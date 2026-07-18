@@ -35,6 +35,7 @@ import {
   Square,
   TestTube2,
   Trash2,
+  UserCheck,
   Wifi,
   WifiOff,
   X,
@@ -42,6 +43,7 @@ import {
 } from "lucide-react";
 import { bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
+import { latestReview, runModelReview } from "./services/reviews";
 import { executeRun, runSummary, type RunProgress } from "./services/runner";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
 import {
@@ -59,6 +61,8 @@ import type {
   Evaluator,
   EvaluationRun,
   ProviderKind,
+  ResultReview,
+  ReviewVerdict,
   RunTarget,
   TestSuite
 } from "./types";
@@ -165,6 +169,15 @@ function App() {
   const persistInterfaceScale = (next: InterfaceScale) => {
     setInterfaceScale(next);
     storage.setInterfaceScale(next);
+  };
+
+  const saveResultReview = (runId: string, resultId: string, review: ResultReview) => {
+    persistRuns(runs.map((run) => run.id === runId ? {
+      ...run,
+      results: run.results.map((result) => result.id === resultId
+        ? { ...result, reviews: [...(result.reviews ?? []), review] }
+        : result)
+    } : run));
   };
 
   const checkCatalogs = async (quiet = false) => {
@@ -285,7 +298,14 @@ function App() {
             <LiveRun run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
           )}
           {page === "results" && (
-            <Results runs={runs} selected={selectedRun} onSelect={setSelectedRunId} onNew={() => navigate("new-run")} />
+            <Results
+              runs={runs}
+              selected={selectedRun}
+              connections={connections}
+              onSelect={setSelectedRunId}
+              onNew={() => navigate("new-run")}
+              onSaveReview={saveResultReview}
+            />
           )}
           {page === "connections" && <Connections connections={connections} onChange={persistConnections} />}
           {page === "settings" && (
@@ -671,7 +691,21 @@ function EvidenceRow({ result }: { result: CaseResult }) {
   );
 }
 
-function Results({ runs, selected, onSelect, onNew }: { runs: EvaluationRun[]; selected: EvaluationRun | null; onSelect: (id: string) => void; onNew: () => void }) {
+function Results({
+  runs,
+  selected,
+  connections,
+  onSelect,
+  onNew,
+  onSaveReview
+}: {
+  runs: EvaluationRun[];
+  selected: EvaluationRun | null;
+  connections: Connection[];
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  onSaveReview: (runId: string, resultId: string, review: ResultReview) => void;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
   if (!selected) {
     return <><PageTitle eyebrow="Evidence archive" title="Results" description="Compare model behavior and inspect every evaluator decision." /><div className="panel empty-state"><BarChart3 size={28} /><strong>No results yet</strong><span>Complete an evaluation to see results here.</span><button className="button button-primary" onClick={onNew}>Start an evaluation</button></div></>;
@@ -714,12 +748,13 @@ function Results({ runs, selected, onSelect, onNew }: { runs: EvaluationRun[]; s
             <div className="panel-heading"><div><h3>Case evidence</h3><p>Every response is tied to an identified model and suite snapshot</p></div><label className="mini-search"><Search size={15} /><input placeholder="Find a result" /></label></div>
             <div className="result-table">
               <div className="result-table-head"><span>Test case</span><span>Model</span><span>Outcome</span><span>Latency</span><span /></div>
-              {selected.results.map((result) => (
-                <div className="result-record" key={result.id}>
+              {selected.results.map((result) => {
+                const review = latestReview(result);
+                return <div className="result-record" key={result.id}>
                   <button className="result-record-row" onClick={() => setExpanded(expanded === result.id ? null : result.id)}>
                     <span><i className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={12} /> : result.status === "review" ? <CircleHelp size={12} /> : <X size={12} />}</i><span><strong>{result.caseTitle}</strong><small>{result.suiteId} · v{result.suiteVersion}</small></span></span>
                     <span><strong>{result.target.model}</strong><small>{providerLabel(result.target.provider)}</small></span>
-                    <span><b className={`status-chip ${result.status}`}>{result.status}</b></span>
+                    <span className="outcome-stack"><b className={`status-chip ${result.status}`}>{result.status}</b>{review && <small className={`review-verdict ${review.verdict}`}>{review.reviewerType === "human" ? "Human" : "Model"}: {review.verdict}</small>}</span>
                     <span>{result.latencyMs.toLocaleString()} ms</span>
                     <span><ChevronDown className={expanded === result.id ? "rotated" : ""} size={17} /></span>
                   </button>
@@ -727,16 +762,92 @@ function Results({ runs, selected, onSelect, onNew }: { runs: EvaluationRun[]; s
                     <div className="result-detail">
                       <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
                       <div><h4>Evaluator evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
+                      <ResultReviewPanel result={result} connections={connections} onSave={(nextReview) => onSaveReview(selected.id, result.id, nextReview)} />
                       <small>Suite hash: {result.suiteHash ?? "not supplied"} · Started {new Date(result.startedAt).toISOString()}</small>
                     </div>
                   )}
-                </div>
-              ))}
+                </div>;
+              })}
             </div>
           </section>
         </div>
       </div>
     </>
+  );
+}
+
+function ResultReviewPanel({ result, connections, onSave }: { result: CaseResult; connections: Connection[]; onSave: (review: ResultReview) => void }) {
+  const [reviewerType, setReviewerType] = useState<"human" | "model">("human");
+  const [humanVerdict, setHumanVerdict] = useState<ReviewVerdict | null>(null);
+  const [notes, setNotes] = useState("");
+  const [reviewTarget, setReviewTarget] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const reviewTargets = connections
+    .filter((connection) => connection.enabled && connection.status === "connected")
+    .flatMap((connection) => {
+      const models = connection.models?.length ? connection.models : connection.modelHint ? [connection.modelHint] : [];
+      return models.map((model) => ({ key: JSON.stringify([connection.id, model]), connection, model }));
+    });
+  const selectedTarget = reviewTargets.find((target) => target.key === reviewTarget) ?? reviewTargets[0];
+
+  const saveHumanReview = () => {
+    if (!humanVerdict) return;
+    onSave({
+      id: crypto.randomUUID(),
+      reviewerType: "human",
+      verdict: humanVerdict,
+      reviewedAt: new Date().toISOString(),
+      notes: notes.trim() || undefined
+    });
+    setNotes("");
+  };
+
+  const askModelToReview = async () => {
+    if (!selectedTarget || !result.response) return;
+    setReviewing(true);
+    setReviewError(null);
+    try {
+      onSave(await runModelReview(result, selectedTarget));
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "The model review failed.");
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  return (
+    <section className="review-panel">
+      <div className="review-heading"><div><h4>Review decision</h4><p>Review verdicts are stored alongside—never over—the automatic evaluator evidence.</p></div>{result.reviews?.length ? <span>{result.reviews.length} saved</span> : null}</div>
+      {result.reviews?.length ? <div className="review-history">{[...result.reviews].reverse().map((review) => (
+        <div className="saved-review" key={review.id}>
+          <span className={`reviewer-mark ${review.reviewerType}`}>{review.reviewerType === "human" ? <UserCheck size={15} /> : <Bot size={15} />}</span>
+          <div><strong>{review.reviewerType === "human" ? "Reviewed by human" : `${review.connectionName} · ${review.model}`}</strong><p>{review.reviewerType === "human" ? review.notes || "No notes supplied." : review.rationale}</p><small>{new Date(review.reviewedAt).toLocaleString()}</small></div>
+          <b className={`review-decision ${review.verdict}`}>{review.verdict}</b>
+        </div>
+      ))}</div> : null}
+      <div className="reviewer-tabs" role="tablist" aria-label="Review method">
+        <button role="tab" aria-selected={reviewerType === "human"} className={reviewerType === "human" ? "active" : ""} onClick={() => setReviewerType("human")}><UserCheck size={15} /> Reviewed by human</button>
+        <button role="tab" aria-selected={reviewerType === "model"} className={reviewerType === "model" ? "active" : ""} onClick={() => setReviewerType("model")}><Bot size={15} /> Use a connected LLM</button>
+      </div>
+      {reviewerType === "human" ? (
+        <div className="human-review-form">
+          <div className="verdict-buttons" aria-label="Human verdict">
+            <button aria-pressed={humanVerdict === "pass"} className={humanVerdict === "pass" ? "pass selected" : "pass"} onClick={() => setHumanVerdict("pass")}><Check size={15} /> Pass</button>
+            <button aria-pressed={humanVerdict === "fail"} className={humanVerdict === "fail" ? "fail selected" : "fail"} onClick={() => setHumanVerdict("fail")}><X size={15} /> Fail</button>
+          </div>
+          <label><span>Reviewer notes (optional)</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Explain the judgment or note any ambiguity…" /></label>
+          <button className="button button-primary button-small" disabled={!humanVerdict} onClick={saveHumanReview}><UserCheck size={15} /> Save human review</button>
+        </div>
+      ) : (
+        <div className="model-review-form">
+          <div className="model-review-warning"><AlertTriangle size={17} /><span><strong>Human review is strongly recommended.</strong> An LLM judge can repeat model biases, miss nuance, or produce an unreliable verdict. Treat this as review assistance, not a substitute for human judgment.</span></div>
+          {reviewTargets.length ? <label><span>Reviewing model</span><select value={selectedTarget?.key ?? ""} onChange={(event) => setReviewTarget(event.target.value)}>{reviewTargets.map((target) => <option key={target.key} value={target.key}>{target.connection.name} · {target.model}</option>)}</select></label> : <p className="review-empty">Connect and test an LLM with an available model before requesting a model review.</p>}
+          {reviewError && <p className="review-error">{reviewError}</p>}
+          <button className="button button-secondary button-small" disabled={!selectedTarget || !result.response || reviewing} onClick={() => void askModelToReview()}>{reviewing ? <LoaderCircle className="spinning" size={15} /> : <Bot size={15} />} {reviewing ? "Reviewing…" : "Run model-assisted review"}</button>
+        </div>
+      )}
+    </section>
   );
 }
 

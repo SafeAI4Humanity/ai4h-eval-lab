@@ -93,6 +93,31 @@ export type EvaluationOutcome = {
   explanation: string;
 };
 
+export type ReviewVerdict = "pass" | "fail";
+
+export type ResultReview =
+  | {
+      id: string;
+      reviewerType: "human";
+      verdict: ReviewVerdict;
+      reviewedAt: string;
+      notes?: string;
+    }
+  | {
+      id: string;
+      reviewerType: "model";
+      verdict: ReviewVerdict;
+      reviewedAt: string;
+      rationale: string;
+      connectionId: string;
+      connectionName: string;
+      provider: ProviderKind;
+      model: string;
+      rawResponse: string;
+      promptTokens?: number;
+      completionTokens?: number;
+    };
+
 export type CaseResult = {
   id: string;
   suiteId: string;
@@ -100,6 +125,7 @@ export type CaseResult = {
   suiteHash?: string;
   caseId: string;
   caseTitle: string;
+  caseMessages?: ChatMessage[];
   target: RunTarget;
   response: string;
   startedAt: string;
@@ -110,6 +136,7 @@ export type CaseResult = {
   outcomes: EvaluationOutcome[];
   status: "pass" | "fail" | "review" | "error";
   error?: string;
+  reviews?: ResultReview[];
 };
 
 export type EvaluationRun = {

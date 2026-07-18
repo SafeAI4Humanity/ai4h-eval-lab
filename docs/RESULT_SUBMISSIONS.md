@@ -54,7 +54,7 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
 }
 ```
 
-The bundle should include exact provider and model IDs, suite versions and hashes, parameters, timestamps, evaluator outcomes, and—only with separate consent—raw model responses. Hardware details, usernames, hostnames, connection URLs, local file paths, API keys, and diagnostic logs should be excluded.
+The bundle should include exact provider and model IDs, suite versions and hashes, parameters, timestamps, evaluator outcomes, and—only with separate consent—raw model responses. Saved reviews should retain the human or model reviewer type, pass/fail verdict, timestamp, and supporting notes or rationale; model-assisted reviews should also retain the reviewing provider, model ID, and raw judge response. Hardware details, usernames, hostnames, connection URLs, local file paths, API keys, and diagnostic logs should be excluded.
 
 ## Trust and moderation
 

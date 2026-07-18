@@ -4,6 +4,10 @@
 
 The app runs on macOS and Linux, connects to local Ollama models and hosted LLM APIs, downloads versioned community test catalogs, and keeps evaluation evidence on the user's device.
 
+## App preview
+
+![AI4H Eval Lab test library](docs/images/ai4h-eval-lab-test-library.jpg)
+
 ## Current capabilities
 
 - Ollama, OpenRouter, Kie.ai, OpenAI, Anthropic, Google Gemini, and generic OpenAI-compatible endpoints
@@ -14,6 +18,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Deterministic parameters where providers support them
 - Exact indicator, exclusion, regular-expression, JSON, non-empty, and human-review evaluators
 - Model-identified evidence records with suite versions, content hashes, timing, tokens, and raw responses
+- Human pass/fail review and optional model-assisted review, with every verdict and reviewer identity preserved in result JSON
 - Local run history, comparison views, and portable JSON export
 - Native operating-system credential storage in desktop builds
 - Configurable local diagnostic logging with redaction, retention limits, and JSON export
@@ -61,7 +66,7 @@ Results remain local unless a user deliberately exports them. The proposed GitHu
 
 ## Research interpretation
 
-Automatic checks are evidence indicators, not a universal model-safety score. Responsible reporting should inspect raw responses and disclose the provider, exact model ID, date, suite version and hash, parameters, sample size, judge or rubric details, and limitations.
+Automatic checks are evidence indicators, not a universal model-safety score. Responsible reporting should inspect raw responses and disclose the provider, exact model ID, date, suite version and hash, parameters, sample size, judge or rubric details, and limitations. Model-assisted reviews can help triage results, but they are not substitutes for human judgment.
 
 ## Privacy
 
