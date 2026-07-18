@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Capabilities for the AI4H Eval Lab main window","local":true,"windows":["main"],"permissions":["core:default","opener:default",{"identifier":"http:default","allow":[{"url":"http://*:*"},{"url":"https://*:*"}]}]}}
