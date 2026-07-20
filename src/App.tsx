@@ -46,6 +46,7 @@ import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, t
 import { latestReview, runModelReview } from "./services/reviews";
 import { executeRun, runSummary, type RunProgress } from "./services/runner";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
+import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
 import {
   clearDiagnosticEntries,
   getDiagnosticConfig,
@@ -145,6 +146,8 @@ function App() {
   const [progress, setProgress] = useState<RunProgress>({ completed: 0, total: 0 });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(runs[0]?.id ?? null);
   const [interfaceScale, setInterfaceScale] = useState<InterfaceScale>(storage.getInterfaceScale);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: "idle", currentVersion: currentAppVersion });
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -198,9 +201,35 @@ function App() {
     }
   };
 
+  const checkAppUpdates = async () => {
+    setAppUpdate({ status: "checking", currentVersion: currentAppVersion });
+    try {
+      const result = await checkForAppUpdate();
+      setAppUpdate({
+        status: result.updateAvailable ? "available" : "current",
+        currentVersion: currentAppVersion,
+        release: result.release
+      });
+      setUpdateNoticeDismissed(false);
+    } catch (error) {
+      setAppUpdate({
+        status: "error",
+        currentVersion: currentAppVersion,
+        error: error instanceof Error ? error.message : "Could not check for application updates."
+      });
+    }
+  };
+
+  const openAvailableUpdate = () => {
+    if (appUpdate.status === "available" || appUpdate.status === "current") {
+      void openReleasePage(appUpdate.release.url);
+    }
+  };
+
   useEffect(() => {
     void checkCatalogs(true);
-    // Catalog checks happen once on launch; subsequent checks are user initiated.
+    void checkAppUpdates();
+    // Catalog and app update checks happen once on launch; subsequent checks are user initiated.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -282,6 +311,14 @@ function App() {
         </header>
 
         <div className="page-wrap">
+          {appUpdate.status === "available" && !updateNoticeDismissed && (
+            <section className="app-update-banner" role="status" aria-live="polite">
+              <span className="update-banner-icon"><Download size={19} /></span>
+              <div><strong>AI4H Eval Lab {appUpdate.release.tagName} is available</strong><span>You are using v{appUpdate.currentVersion}. Review the release notes before downloading the installer for your platform.</span></div>
+              <button className="button button-primary button-small" onClick={openAvailableUpdate}><ExternalLink size={15} /> View release</button>
+              <button className="icon-button small" onClick={() => setUpdateNoticeDismissed(true)} aria-label="Dismiss update notification"><X size={16} /></button>
+            </section>
+          )}
           {page === "dashboard" && (
             <Dashboard
               suites={suites}
@@ -316,6 +353,9 @@ function App() {
               onChange={persistSources}
               onRefresh={() => void checkCatalogs()}
               checking={catalogChecking}
+              appUpdate={appUpdate}
+              onCheckUpdate={() => void checkAppUpdates()}
+              onOpenUpdate={openAvailableUpdate}
             />
           )}
         </div>
@@ -987,13 +1027,16 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
   );
 }
 
-function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChange, onRefresh, checking }: {
+function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChange, onRefresh, checking, appUpdate, onCheckUpdate, onOpenUpdate }: {
   sources: CatalogSource[];
   interfaceScale: InterfaceScale;
   onInterfaceScaleChange: (scale: InterfaceScale) => void;
   onChange: (sources: CatalogSource[]) => void;
   onRefresh: () => void;
   checking: boolean;
+  appUpdate: AppUpdateState;
+  onCheckUpdate: () => void;
+  onOpenUpdate: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -1017,7 +1060,7 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
     <>
       <PageTitle eyebrow="Preferences" title="Settings & sources" description="Control community catalogs, privacy defaults, and application behavior." />
       <div className="settings-layout">
-        <div className="settings-nav panel"><button className="active" onClick={() => document.getElementById("appearance-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Settings size={17} /> Appearance</button><button onClick={() => document.getElementById("catalog-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><BookOpen size={17} /> Catalog sources</button><button><ShieldCheck size={17} /> Privacy</button><button onClick={() => document.getElementById("diagnostics-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Activity size={17} /> Diagnostics</button><button><SlidersHorizontal size={17} /> Evaluation defaults</button><button><Download size={17} /> Updates</button></div>
+        <div className="settings-nav panel"><button className="active" onClick={() => document.getElementById("appearance-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Settings size={17} /> Appearance</button><button onClick={() => document.getElementById("catalog-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><BookOpen size={17} /> Catalog sources</button><button><ShieldCheck size={17} /> Privacy</button><button onClick={() => document.getElementById("diagnostics-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Activity size={17} /> Diagnostics</button><button><SlidersHorizontal size={17} /> Evaluation defaults</button><button onClick={() => document.getElementById("update-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Download size={17} /> Updates</button></div>
         <div className="settings-main">
           <section className="panel settings-section" id="appearance-settings">
             <div className="panel-heading"><div><h3>Appearance</h3><p>Make the app easier to read independently of your system display settings.</p></div></div>
@@ -1069,6 +1112,24 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
               </select>
             </div>
             <div className="diagnostic-actions"><button className="button button-secondary" onClick={exportDiagnosticLog} disabled={!diagnosticCount}><Download size={16} /> Export diagnostic log</button><button className="button button-secondary" onClick={clearDiagnosticEntries} disabled={!diagnosticCount}><Trash2 size={16} /> Clear log</button><span>Query strings and key-like values are redacted before storage.</span></div>
+          </section>
+          <section className="panel settings-section" id="update-settings">
+            <div className="panel-heading"><div><h3>Application updates</h3><p>Check the latest official release published by Safe AI for Humanity on GitHub.</p></div>{appUpdate.status === "available" ? <span className="status-chip review">Update available</span> : appUpdate.status === "current" ? <span className="status-chip success">Up to date</span> : null}</div>
+            <div className="setting-row update-setting-row">
+              <div><strong>Installed version</strong><span>AI4H Eval Lab v{appUpdate.currentVersion}</span></div>
+              <div className="update-status-copy">
+                {appUpdate.status === "idle" && <span>Not checked yet.</span>}
+                {appUpdate.status === "checking" && <span>Checking GitHub Releases…</span>}
+                {appUpdate.status === "current" && <span>You have the latest published version, {appUpdate.release.tagName}.</span>}
+                {appUpdate.status === "available" && <span>{appUpdate.release.name} was published {new Date(appUpdate.release.publishedAt).toLocaleDateString()}.</span>}
+                {appUpdate.status === "error" && <span className="update-error">{appUpdate.error}</span>}
+              </div>
+            </div>
+            <div className="update-actions">
+              <button className="button button-secondary" onClick={onCheckUpdate} disabled={appUpdate.status === "checking"}><RefreshCw className={appUpdate.status === "checking" ? "spinning" : ""} size={16} /> {appUpdate.status === "checking" ? "Checking…" : "Check for updates"}</button>
+              {(appUpdate.status === "available" || appUpdate.status === "current") && <button className="button button-primary" onClick={onOpenUpdate}><ExternalLink size={16} /> {appUpdate.status === "available" ? "View latest release" : "Open release page"}</button>}
+              <span>Updates are never downloaded or installed without your action.</span>
+            </div>
           </section>
         </div>
       </div>

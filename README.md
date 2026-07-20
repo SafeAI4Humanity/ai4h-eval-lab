@@ -20,6 +20,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Model-identified evidence records with suite versions, content hashes, timing, tokens, and raw responses
 - Human pass/fail review and optional model-assisted review, with every verdict and reviewer identity preserved in result JSON
 - Local run history, comparison views, and portable JSON export
+- Automatic startup and manual GitHub release checks, with user-controlled installer downloads
 - Native operating-system credential storage in desktop builds
 - Configurable local diagnostic logging with redaction, retention limits, and JSON export
 - No AI4H product telemetry
