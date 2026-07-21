@@ -43,7 +43,7 @@ import {
 } from "lucide-react";
 import { bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
-import { latestReview, runModelReview } from "./services/reviews";
+import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, type RunProgress } from "./services/runner";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
@@ -175,12 +175,16 @@ function App() {
   };
 
   const saveResultReview = (runId: string, resultId: string, review: ResultReview) => {
-    persistRuns(runs.map((run) => run.id === runId ? {
-      ...run,
-      results: run.results.map((result) => result.id === resultId
-        ? { ...result, reviews: [...(result.reviews ?? []), review] }
-        : result)
-    } : run));
+    setRuns((currentRuns) => {
+      const nextRuns = currentRuns.map((run) => run.id === runId ? {
+        ...run,
+        results: run.results.map((result) => result.id === resultId
+          ? { ...result, reviews: [...(result.reviews ?? []), review] }
+          : result)
+      } : run);
+      storage.setRuns(nextRuns);
+      return nextRuns;
+    });
   };
 
   const checkCatalogs = async (quiet = false) => {
@@ -747,6 +751,7 @@ function Results({
   onSaveReview: (runId: string, resultId: string, review: ResultReview) => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [bulkReviewOpen, setBulkReviewOpen] = useState(false);
   if (!selected) {
     return <><PageTitle eyebrow="Evidence archive" title="Results" description="Compare model behavior and inspect every evaluator decision." /><div className="panel empty-state"><BarChart3 size={28} /><strong>No results yet</strong><span>Complete an evaluation to see results here.</span><button className="button button-primary" onClick={onNew}>Start an evaluation</button></div></>;
   }
@@ -759,7 +764,7 @@ function Results({
         eyebrow="Evidence archive"
         title="Results"
         description="Inspect model-identified results, raw responses, timing, and evaluator decisions."
-        action={<button className="button button-secondary" onClick={() => exportRun(selected)}><Download size={16} /> Export JSON</button>}
+        action={<div className="page-actions"><button className="button button-secondary" onClick={() => setBulkReviewOpen(true)}><Bot size={16} /> Bulk LLM review</button><button className="button button-secondary" onClick={() => exportRun(selected)}><Download size={16} /> Export JSON</button></div>}
       />
       <div className="results-layout">
         <aside className="run-history panel">
@@ -812,7 +817,99 @@ function Results({
           </section>
         </div>
       </div>
+      {bulkReviewOpen && <BulkReviewModal run={selected} connections={connections} onSave={onSaveReview} onClose={() => setBulkReviewOpen(false)} />}
     </>
+  );
+}
+
+function BulkReviewModal({ run, connections, onSave, onClose }: {
+  run: EvaluationRun;
+  connections: Connection[];
+  onSave: (runId: string, resultId: string, review: ResultReview) => void;
+  onClose: () => void;
+}) {
+  const [reviewTarget, setReviewTarget] = useState("");
+  const [scope, setScope] = useState<BulkReviewScope>("unreviewed");
+  const [running, setRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [completed, setCompleted] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [currentTitle, setCurrentTitle] = useState<string | null>(null);
+  const [failures, setFailures] = useState<Array<{ id: string; title: string; message: string }>>([]);
+  const [outcome, setOutcome] = useState<"complete" | "cancelled" | null>(null);
+  const cancelRef = useRef(false);
+  const reviewTargets = connectedReviewTargets(connections);
+  const selectedTarget = reviewTargets.find((target) => target.key === reviewTarget) ?? reviewTargets[0];
+  const candidates = selectedTarget ? bulkReviewCandidates(run.results, selectedTarget, scope) : [];
+  const responseResults = run.results.filter((result) => result.response && result.status !== "error");
+  const sameModelCount = selectedTarget ? responseResults.filter((result) => isSameReviewerModel(result, selectedTarget)).length : 0;
+  const previouslyReviewedCount = responseResults.filter((result) => result.reviews?.some((review) => review.reviewerType === "model")).length;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+
+  const startBulkReview = async () => {
+    if (!selectedTarget) return;
+    const queue = [...bulkReviewCandidates(run.results, selectedTarget, scope)];
+    if (!queue.length) return;
+    cancelRef.current = false;
+    setRunning(true);
+    setCancelling(false);
+    setCompleted(0);
+    setTotal(queue.length);
+    setFailures([]);
+    setOutcome(null);
+    let processed = 0;
+    for (const result of queue) {
+      if (cancelRef.current) break;
+      setCurrentTitle(result.caseTitle);
+      try {
+        onSave(run.id, result.id, await runModelReview(result, selectedTarget));
+      } catch (error) {
+        setFailures((current) => [...current, {
+          id: result.id,
+          title: result.caseTitle,
+          message: error instanceof Error ? error.message : "The model review failed."
+        }]);
+      }
+      processed += 1;
+      setCompleted(processed);
+    }
+    setCurrentTitle(null);
+    setOutcome(cancelRef.current ? "cancelled" : "complete");
+    setRunning(false);
+    setCancelling(false);
+  };
+
+  const requestCancel = () => {
+    cancelRef.current = true;
+    setCancelling(true);
+  };
+
+  return (
+    <Modal title="Bulk LLM review" onClose={onClose} closeDisabled={running} wide>
+      <div className="bulk-review-modal">
+        <div className="model-review-warning"><AlertTriangle size={17} /><span><strong>Human review is strongly recommended.</strong> Bulk LLM review is useful for triage, but a model judge can repeat biases, miss nuance, or be influenced by evaluated content. Treat these verdicts as review assistance.</span></div>
+        {reviewTargets.length ? <div className="bulk-review-config">
+          <label className="field"><span>Reviewing model</span><select value={selectedTarget?.key ?? ""} onChange={(event) => setReviewTarget(event.target.value)} disabled={running}>{reviewTargets.map((target) => <option key={target.key} value={target.key}>{target.connection.name} · {target.model}</option>)}</select></label>
+          <label className="field"><span>Review scope</span><select value={scope} onChange={(event) => setScope(event.target.value as BulkReviewScope)} disabled={running}><option value="unreviewed">Responses without an LLM review</option><option value="all">All responses — add another review</option></select></label>
+        </div> : <p className="review-empty">Connect and test an LLM with an available model before starting a bulk review.</p>}
+        <div className="bulk-review-counts">
+          <span><strong>{candidates.length}</strong> eligible responses</span>
+          <span><strong>{sameModelCount}</strong> same-model skipped</span>
+          <span><strong>{previouslyReviewedCount}</strong> previously LLM-reviewed</span>
+        </div>
+        <p className="bulk-review-note">The reviewer must be different from the evaluated model. Requests run one at a time to reduce rate-limit pressure, and every completed verdict is saved immediately.</p>
+        {(running || outcome) && <div className="bulk-review-progress">
+          <div><strong>{running ? cancelling ? "Stopping after the current response…" : `Reviewing ${currentTitle ?? "response"}` : outcome === "cancelled" ? "Bulk review stopped" : "Bulk review complete"}</strong><span>{completed} of {total} processed · {Math.max(0, completed - failures.length)} saved · {failures.length} failed</span></div>
+          <b>{percent}%</b>
+          <div className="progress-track"><span style={{ width: `${percent}%` }} /></div>
+        </div>}
+        {failures.length ? <div className="bulk-review-errors"><strong>{failures.length} response{failures.length === 1 ? "" : "s"} could not be reviewed</strong>{failures.slice(0, 4).map((failure) => <span key={failure.id}>{failure.title}: {failure.message}</span>)}</div> : null}
+        <div className="modal-actions">
+          <button className="button button-secondary" onClick={onClose} disabled={running}>Close</button>
+          {running ? <button className="button button-secondary" onClick={requestCancel} disabled={cancelling}><Square size={14} fill="currentColor" /> {cancelling ? "Stopping…" : "Stop after current"}</button> : <button className="button button-primary" onClick={() => void startBulkReview()} disabled={!selectedTarget || !candidates.length}><Bot size={15} /> {outcome ? "Run bulk review again" : `Review ${candidates.length} response${candidates.length === 1 ? "" : "s"}`}</button>}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -823,12 +920,7 @@ function ResultReviewPanel({ result, connections, onSave }: { result: CaseResult
   const [reviewTarget, setReviewTarget] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const reviewTargets = connections
-    .filter((connection) => connection.enabled && connection.status === "connected")
-    .flatMap((connection) => {
-      const models = connection.models?.length ? connection.models : connection.modelHint ? [connection.modelHint] : [];
-      return models.map((model) => ({ key: JSON.stringify([connection.id, model]), connection, model }));
-    });
+  const reviewTargets = connectedReviewTargets(connections);
   const selectedTarget = reviewTargets.find((target) => target.key === reviewTarget) ?? reviewTargets[0];
 
   const saveHumanReview = () => {
@@ -1138,8 +1230,8 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{children}</div></div>;
+function Modal({ title, children, onClose, closeDisabled = false, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; closeDisabled?: boolean; wide?: boolean }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (!closeDisabled && event.target === event.currentTarget) onClose(); }}><div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose} disabled={closeDisabled} aria-label="Close"><X size={19} /></button></div>{children}</div></div>;
 }
 
 function exportRun(run: EvaluationRun) {

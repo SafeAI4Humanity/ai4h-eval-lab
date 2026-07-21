@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CaseResult } from "../types";
-import { buildModelReviewMessages, parseModelReviewResponse, reviewRubric } from "./reviews";
+import { bulkReviewCandidates, buildModelReviewMessages, connectedReviewTargets, parseModelReviewResponse, reviewRubric } from "./reviews";
 
 const result: CaseResult = {
   id: "result-1",
@@ -37,5 +37,33 @@ describe("model-assisted reviews", () => {
   it("rejects ambiguous model output", () => {
     expect(() => parseModelReviewResponse("Looks good to me.")).toThrow("valid JSON");
     expect(() => parseModelReviewResponse('{"verdict":"review","rationale":"Unclear"}')).toThrow("pass or fail");
+  });
+
+  it("discovers reviewer models from connected, enabled connections", () => {
+    const targets = connectedReviewTargets([
+      { id: "ready", name: "Ready", provider: "ollama", baseUrl: "http://localhost:11434", enabled: true, status: "connected", models: ["judge-a", "judge-b"] },
+      { id: "hint", name: "Hint", provider: "openai", baseUrl: "https://api.example.test", enabled: true, status: "connected", modelHint: "judge-c" },
+      { id: "offline", name: "Offline", provider: "ollama", baseUrl: "http://offline", enabled: true, status: "unavailable", models: ["ignored"] }
+    ]);
+    expect(targets.map((target) => target.model)).toEqual(["judge-a", "judge-b", "judge-c"]);
+  });
+
+  it("selects bulk-review candidates without reviewing a model with itself", () => {
+    const reviewer = {
+      connection: { id: "reviewer", name: "Reviewer", provider: "ollama" as const, baseUrl: "http://localhost:11434", enabled: true, status: "connected" as const },
+      model: "judge-model"
+    };
+    const differentModel = { ...result, id: "different", target: { ...result.target, model: "evaluated-model" } };
+    const sameModel = { ...result, id: "same", target: { ...result.target, model: "judge-model" } };
+    const alreadyReviewed = {
+      ...result,
+      id: "reviewed",
+      target: { ...result.target, model: "evaluated-model" },
+      reviews: [{ id: "review", reviewerType: "model" as const, verdict: "pass" as const, reviewedAt: "2026-07-18T00:00:02Z", rationale: "Good", connectionId: "reviewer", connectionName: "Reviewer", provider: "ollama" as const, model: "judge-model", rawResponse: "{}" }]
+    };
+    const errorResult = { ...result, id: "error", response: "", status: "error" as const };
+
+    expect(bulkReviewCandidates([differentModel, sameModel, alreadyReviewed, errorResult], reviewer, "unreviewed").map((item) => item.id)).toEqual(["different"]);
+    expect(bulkReviewCandidates([differentModel, sameModel, alreadyReviewed, errorResult], reviewer, "all").map((item) => item.id)).toEqual(["different", "reviewed"]);
   });
 });

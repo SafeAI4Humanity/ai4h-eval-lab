@@ -6,6 +6,29 @@ export type ModelReviewTarget = {
   model: string;
 };
 
+export type BulkReviewScope = "unreviewed" | "all";
+
+export function connectedReviewTargets(connections: Connection[]): Array<ModelReviewTarget & { key: string }> {
+  return connections
+    .filter((connection) => connection.enabled && connection.status === "connected")
+    .flatMap((connection) => {
+      const models = connection.models?.length ? connection.models : connection.modelHint ? [connection.modelHint] : [];
+      return models.map((model) => ({ key: JSON.stringify([connection.id, model]), connection, model }));
+    });
+}
+
+export function isSameReviewerModel(result: CaseResult, target: ModelReviewTarget): boolean {
+  return result.target.provider === target.connection.provider && result.target.model === target.model;
+}
+
+export function bulkReviewCandidates(results: CaseResult[], target: ModelReviewTarget, scope: BulkReviewScope): CaseResult[] {
+  return results.filter((result) => {
+    if (!result.response || result.status === "error" || isSameReviewerModel(result, target)) return false;
+    if (scope === "all") return true;
+    return !result.reviews?.some((review) => review.reviewerType === "model");
+  });
+}
+
 export function reviewRubric(result: CaseResult): string {
   const rubrics = result.outcomes
     .filter((outcome) => outcome.evaluator.type === "human_review")
