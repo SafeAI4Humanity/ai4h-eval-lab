@@ -45,6 +45,7 @@ import { bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
 import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, type RunProgress } from "./services/runner";
+import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
 import {
@@ -343,6 +344,7 @@ function App() {
               runs={runs}
               selected={selectedRun}
               connections={connections}
+              suites={suites}
               onSelect={setSelectedRunId}
               onNew={() => navigate("new-run")}
               onSaveReview={saveResultReview}
@@ -739,6 +741,7 @@ function Results({
   runs,
   selected,
   connections,
+  suites,
   onSelect,
   onNew,
   onSaveReview
@@ -746,12 +749,14 @@ function Results({
   runs: EvaluationRun[];
   selected: EvaluationRun | null;
   connections: Connection[];
+  suites: TestSuite[];
   onSelect: (id: string) => void;
   onNew: () => void;
   onSaveReview: (runId: string, resultId: string, review: ResultReview) => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [bulkReviewOpen, setBulkReviewOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
   if (!selected) {
     return <><PageTitle eyebrow="Evidence archive" title="Results" description="Compare model behavior and inspect every evaluator decision." /><div className="panel empty-state"><BarChart3 size={28} /><strong>No results yet</strong><span>Complete an evaluation to see results here.</span><button className="button button-primary" onClick={onNew}>Start an evaluation</button></div></>;
   }
@@ -764,7 +769,7 @@ function Results({
         eyebrow="Evidence archive"
         title="Results"
         description="Inspect model-identified results, raw responses, timing, and evaluator decisions."
-        action={<div className="page-actions"><button className="button button-secondary" onClick={() => setBulkReviewOpen(true)}><Bot size={16} /> Bulk LLM review</button><button className="button button-secondary" onClick={() => exportRun(selected)}><Download size={16} /> Export JSON</button></div>}
+        action={<div className="page-actions"><button className="button button-secondary" onClick={() => setPublicationOpen(true)}><FileJson size={16} /> Prepare publication</button><button className="button button-secondary" onClick={() => setBulkReviewOpen(true)}><Bot size={16} /> Bulk LLM review</button><button className="button button-secondary" onClick={() => exportRun(selected)}><Download size={16} /> Export JSON</button></div>}
       />
       <div className="results-layout">
         <aside className="run-history panel">
@@ -818,7 +823,54 @@ function Results({
         </div>
       </div>
       {bulkReviewOpen && <BulkReviewModal run={selected} connections={connections} onSave={onSaveReview} onClose={() => setBulkReviewOpen(false)} />}
+      {publicationOpen && <PublicationModal run={selected} suites={suites} onClose={() => setPublicationOpen(false)} />}
     </>
+  );
+}
+
+function PublicationModal({ run, suites, onClose }: { run: EvaluationRun; suites: TestSuite[]; onClose: () => void }) {
+  const [submitter, setSubmitter] = useState("");
+  const [notes, setNotes] = useState("");
+  const [publicConsent, setPublicConsent] = useState(false);
+  const [evidenceConsent, setEvidenceConsent] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
+  const issues = publicationIssues(run, suites);
+  const modelCount = new Set(run.results.map((result) => `${result.target.provider}:${result.target.model}`)).size;
+  const reviewedCount = run.results.filter((result) => result.reviews?.length).length;
+
+  const prepare = () => {
+    if (issues.length || !publicConsent || !evidenceConsent) return;
+    const submission = buildEvaluationSubmission(run, suites, { submitter, notes }, currentAppVersion);
+    downloadJson(submission, submissionFileName(submission));
+    setDownloaded(true);
+  };
+
+  return (
+    <Modal title="Prepare website submission" onClose={onClose} wide>
+      <div className="publication-modal">
+        <div className="publication-warning"><AlertTriangle size={18} /><span><strong>This creates a public evidence bundle.</strong> If accepted through GitHub review, prompts, model responses, evaluator evidence, and saved review notes will be visible on the AI4H website.</span></div>
+        <div className="bulk-review-counts publication-counts">
+          <span><strong>{run.results.length}</strong> case results</span>
+          <span><strong>{modelCount}</strong> identified model{modelCount === 1 ? "" : "s"}</span>
+          <span><strong>{reviewedCount}</strong> reviewed responses</span>
+        </div>
+        {issues.length ? <div className="publication-issues"><strong>This run is not ready for public submission</strong>{issues.slice(0, 6).map((issue) => <span key={issue}>{issue}</span>)}<small>Refresh the official catalog and run the evaluation again to capture release-grade suite metadata.</small></div> : null}
+        <div className="publication-grid">
+          <div><strong>Included</strong><span>Exact provider and model IDs</span><span>Suite versions, categories, and SHA-256 hashes</span><span>Prompts, raw responses, evaluator outcomes, and reviews</span><span>Timing and token counts when available</span></div>
+          <div><strong>Excluded</strong><span>API keys and stored credentials</span><span>Connection URLs, IDs, and local connection names</span><span>Hostnames, local paths, and diagnostic details</span><span>Application logs and unrelated settings</span></div>
+        </div>
+        <label className="field"><span>Public submitter name <small>Optional</small></span><input value={submitter} onChange={(event) => setSubmitter(event.target.value)} maxLength={120} placeholder="Individual, lab, or organization" /></label>
+        <label className="field"><span>Methodology notes <small>Optional</small></span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} rows={4} placeholder="Hardware context, reproduction notes, or other information readers should know" /></label>
+        <label className="consent-row"><input type="checkbox" checked={publicConsent} onChange={(event) => setPublicConsent(event.target.checked)} /><span><strong>I authorize public release of this evaluation bundle.</strong><small>Accepted submissions remain publicly downloadable and may be cited by AI4H or others.</small></span></label>
+        <label className="consent-row"><input type="checkbox" checked={evidenceConsent} onChange={(event) => setEvidenceConsent(event.target.checked)} /><span><strong>I reviewed the raw responses and review notes for sensitive information.</strong><small>Model output is untrusted content and may contain inaccurate, offensive, or unsafe material.</small></span></label>
+        {downloaded && <div className="publication-ready"><CheckCircle2 size={17} /><span><strong>Bundle downloaded.</strong> Review the file once more, then add it under <code>submissions/YYYY/MM/</code> in the results repository through a pull request.</span></div>}
+        <div className="modal-actions">
+          <button className="button button-secondary" onClick={onClose}>Close</button>
+          {downloaded && <button className="button button-secondary" onClick={() => void openReleasePage("https://github.com/SafeAI4Humanity/ai4h-evaluation-results")}><Github size={15} /> Contribution instructions</button>}
+          <button className="button button-primary" onClick={prepare} disabled={Boolean(issues.length) || !publicConsent || !evidenceConsent}><Download size={15} /> Download public bundle</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1235,11 +1287,15 @@ function Modal({ title, children, onClose, closeDisabled = false, wide = false }
 }
 
 function exportRun(run: EvaluationRun) {
-  const blob = new Blob([JSON.stringify({ schemaVersion: 1, exportedAt: new Date().toISOString(), organization: "Safe AI for Humanity Foundation", run }, null, 2)], { type: "application/json" });
+  downloadJson({ schemaVersion: 1, exportedAt: new Date().toISOString(), organization: "Safe AI for Humanity Foundation", run }, `ai4h-evaluation-${run.id}.json`);
+}
+
+function downloadJson(value: unknown, fileName: string) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `ai4h-evaluation-${run.id}.json`;
+  link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
 }

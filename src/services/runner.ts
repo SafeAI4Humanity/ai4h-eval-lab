@@ -21,7 +21,7 @@ export async function executeRun(
     name,
     createdAt: new Date().toISOString(),
     status: "running",
-    suiteSnapshots: suites.map(({ id, version, title, contentHash }) => ({ id, version, title, contentHash })),
+    suiteSnapshots: suites.map(({ id, version, title, category, risk, contentHash }) => ({ id, version, title, category, risk, contentHash })),
     targets,
     results: []
   };

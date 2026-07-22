@@ -19,6 +19,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Exact indicator, exclusion, regular-expression, JSON, non-empty, and human-review evaluators
 - Model-identified evidence records with suite versions, content hashes, timing, tokens, and raw responses
 - Human pass/fail review plus individual or bulk model-assisted review, with every verdict and reviewer identity preserved in result JSON
+- Consent-based public submission bundles with suite categories and hashes, stripped local connection details, and GitHub contribution guidance
 - Local run history, comparison views, and portable JSON export
 - Automatic startup and manual GitHub release checks, with user-controlled installer downloads
 - Native operating-system credential storage in desktop builds
@@ -63,7 +64,7 @@ Catalogs conform to schema version 1 and contain a `suites` array. Test content 
 
 ## Community result submissions
 
-Results remain local unless a user deliberately exports them. The proposed GitHub review workflow and future hosted intake architecture are documented in [`docs/RESULT_SUBMISSIONS.md`](docs/RESULT_SUBMISSIONS.md).
+Results remain local unless a user deliberately exports them. **Prepare publication** creates a separate, consented bundle for the GitHub-reviewed [`SafeAI4Humanity/ai4h-evaluation-results`](https://github.com/SafeAI4Humanity/ai4h-evaluation-results) workflow. The publication contract and future hosted intake architecture are documented in [`docs/RESULT_SUBMISSIONS.md`](docs/RESULT_SUBMISSIONS.md).
 
 ## Research interpretation
 

@@ -145,7 +145,7 @@ export type EvaluationRun = {
   createdAt: string;
   completedAt?: string;
   status: "running" | "completed" | "cancelled";
-  suiteSnapshots: Array<Pick<TestSuite, "id" | "version" | "title" | "contentHash">>;
+  suiteSnapshots: Array<Pick<TestSuite, "id" | "version" | "title" | "contentHash"> & Partial<Pick<TestSuite, "category" | "risk">>>;
   targets: RunTarget[];
   results: CaseResult[];
 };

@@ -1,23 +1,29 @@
-# Result submission design
+# Result submission workflow
 
-AI4H Eval Lab keeps results local by default. Any future submission flow must be explicit, previewable, and separate from normal evaluation execution.
+AI4H Eval Lab keeps results local by default. Public submission is explicit, previewable, and separate from normal evaluation export.
 
-## Recommended rollout
+## Phase 1: GitHub-reviewed submissions
 
-### Phase 1: GitHub-reviewed submissions
+The **Prepare publication** action creates a schema-versioned bundle for the public `ai4h-evaluation-results` repository. It requires separate confirmation for public release and for inspection of raw responses and review notes.
 
-Create a public `ai4h-evaluation-results` repository with:
+The bundle includes:
 
-- a versioned JSON Schema for submission envelopes;
-- a `submissions/pending/` directory for pull requests;
-- CI that validates schemas, suite hashes, model identity, timestamps, and duplicate result hashes;
-- an issue or pull-request template that requires methodology and consent statements;
-- maintainer review before moving results into `submissions/accepted/`;
-- a generated, read-only catalog consumed by the AI4H website.
+- exact provider and model identifiers;
+- released suite IDs, semantic versions, categories, risk labels, and SHA-256 content hashes;
+- original prompts, raw responses, evaluator outcomes, timing, and token counts when available;
+- saved human and model-assisted review evidence;
+- optional public submitter identity and methodology notes;
+- explicit public-release, raw-response, and review consent.
 
-The app should initially provide **Prepare submission bundle** and **Open contribution instructions** actions. It should not request a GitHub token or upload automatically. Contributors can inspect the JSON and submit it through GitHub's normal pull-request workflow.
+The bundle excludes connection URLs, connection IDs, local connection names, credentials, hostnames, local paths, diagnostics, and unrelated settings. Request errors retain their status while local diagnostic details are replaced with a public-safe explanation.
 
-### Phase 2: Hosted intake service
+Only completed runs with original test messages and release-grade suite hashes can be prepared. Older offline runs using placeholder bundle hashes must be rerun after refreshing the official catalog.
+
+Contributors inspect the downloaded JSON and add it to `submissions/YYYY/MM/<submissionId>.json` through a normal GitHub pull request. The app never requests a GitHub token or uploads automatically.
+
+Repository CI validates the schema, official suite metadata, hashes, timestamps, model identities, duplicates, file path, and prohibited local metadata. Merged submissions are accepted evidence. A separate generator publishes model-card summaries and full case evidence for the AI4H website.
+
+## Phase 2: Hosted intake service
 
 Replace the manual contribution step with an optional HTTPS endpoint hosted on AWS or GCP:
 
@@ -39,12 +45,12 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
   "submittedAt": "ISO-8601 timestamp",
   "app": {
     "name": "AI4H Eval Lab",
-    "version": "0.1.0"
+    "version": "0.5.0"
   },
   "consent": {
     "publicRelease": true,
     "includeRawResponses": true,
-    "includeEnvironmentDetails": false
+    "includeReviews": true
   },
   "provenance": {
     "submitter": "optional public name",
@@ -54,11 +60,13 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
 }
 ```
 
-The bundle should include exact provider and model IDs, suite versions and hashes, parameters, timestamps, evaluator outcomes, and—only with separate consent—raw model responses. Saved reviews should retain the human or model reviewer type, pass/fail verdict, timestamp, and supporting notes or rationale; model-assisted reviews should also retain the reviewing provider, model ID, and raw judge response. Hardware details, usernames, hostnames, connection URLs, local file paths, API keys, and diagnostic logs should be excluded.
+Suite snapshots also contain the category and risk label needed to reproduce dimension-level website cards without depending on a mutable catalog lookup.
 
 ## Trust and moderation
 
-Community results are evidence submissions, not automatically verified findings. The public site should distinguish:
+Community results are evidence submissions, not vendor-authored model cards or universal safety certifications. The public site distinguishes automatic indicators, human verdicts, and provisional model-assisted reviews rather than blending them into a composite score.
+
+Publication state should distinguish:
 
 - submitted and unreviewed;
 - schema-validated;
