@@ -91,7 +91,7 @@ AI4H Eval Lab does not upload results or collect product analytics. Prompts sele
 
 ## Support this work
 
-AI4H Eval Lab is an open-source project of the Safe AI for Humanity Foundation. [Make a financial contribution](https://ai-4-h.org/#donate) to support independent AI safety research, public evaluation suites, and freely available tools.
+AI4H Eval Lab is an open-source project of the Safe AI for Humanity Foundation, an IRS-recognized **Non-Profit · 501(c)(3)** organization. Financial contributions are tax-deductible to the extent permitted by law. [Make a financial contribution](https://ai-4-h.org/#donate) to support independent AI safety research, public evaluation suites, and freely available tools.
 
 ## License
 
