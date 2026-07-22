@@ -93,7 +93,7 @@ export type EvaluationOutcome = {
   explanation: string;
 };
 
-export type ReviewVerdict = "pass" | "fail";
+export type ReviewVerdict = "pass" | "mostly_pass" | "fail";
 
 export type ResultReview =
   | {
