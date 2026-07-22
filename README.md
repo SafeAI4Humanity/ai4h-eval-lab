@@ -26,6 +26,21 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Configurable local diagnostic logging with redaction, retention limits, and JSON export
 - No AI4H product telemetry
 
+## Download and install
+
+Prebuilt macOS and Linux packages are available from the [latest GitHub release](https://github.com/SafeAI4Humanity/ai4h-eval-lab/releases/latest).
+
+### macOS security notice
+
+AI4H Eval Lab is not currently code-signed or notarized. Because of this, macOS may block the app the first time you try to open it. After attempting to launch the app:
+
+1. Open **System Settings**.
+2. Select **Privacy & Security**.
+3. Scroll to the security message about AI4H Eval Lab and click **Open Anyway**.
+4. Confirm that you want to open the app.
+
+For safety, only install builds downloaded from the official GitHub releases linked above.
+
 ## Development
 
 Requirements for the web interface:
@@ -73,6 +88,10 @@ Automatic checks are evidence indicators, not a universal model-safety score. Re
 ## Privacy
 
 AI4H Eval Lab does not upload results or collect product analytics. Prompts selected for a remote provider necessarily leave the device and are subject to that provider's terms. Ollama runs may remain fully local. See [SECURITY.md](SECURITY.md).
+
+## Support this work
+
+AI4H Eval Lab is an open-source project of the Safe AI for Humanity Foundation. [Make a financial contribution](https://ai-4-h.org/#donate) to support independent AI safety research, public evaluation suites, and freely available tools.
 
 ## License
 
