@@ -11,6 +11,7 @@ The bundle includes:
 - exact provider and model identifiers;
 - released suite IDs, semantic versions, categories, risk labels, and SHA-256 content hashes;
 - original prompts, raw responses, evaluator outcomes, timing, and token counts when available;
+- complete stage-by-stage prompts, real carried-forward model responses, evaluator outcomes, and first indicator-failure stage for fixed multi-turn cases;
 - saved human and model-assisted review evidence;
 - optional public submitter identity and methodology notes;
 - explicit public-release, raw-response, and review consent.
@@ -40,12 +41,12 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "submissionId": "uuid",
   "submittedAt": "ISO-8601 timestamp",
   "app": {
     "name": "AI4H Eval Lab",
-    "version": "0.5.0"
+    "version": "0.7.0"
   },
   "consent": {
     "publicRelease": true,

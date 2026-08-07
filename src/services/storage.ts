@@ -29,8 +29,21 @@ const defaultSources: CatalogSource[] = [
     url: "https://github.com/SafeAI4Humanity/ai4h-test-suites/releases/latest/download/catalog.json",
     official: true,
     enabled: true
+  },
+  {
+    id: "ai4h-official-v2",
+    name: "AI4H Multi-turn Catalog",
+    url: "https://github.com/SafeAI4Humanity/ai4h-test-suites/releases/latest/download/catalog-v2.json",
+    official: true,
+    enabled: true
   }
 ];
+
+function readSources(): CatalogSource[] {
+  const saved = read<CatalogSource[]>(keys.sources, []);
+  const byId = new Map(saved.map((source) => [source.id, source]));
+  return [...saved, ...defaultSources.filter((source) => !byId.has(source.id))];
+}
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -48,7 +61,7 @@ function write<T>(key: string, value: T): void {
 export const storage = {
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
-  getSources: () => read(keys.sources, defaultSources),
+  getSources: readSources,
   setSources: (value: CatalogSource[]) => write(keys.sources, value),
   getRuns: () => read<EvaluationRun[]>(keys.runs, []),
   setRuns: (value: EvaluationRun[]) => write(keys.runs, value.slice(0, 100)),

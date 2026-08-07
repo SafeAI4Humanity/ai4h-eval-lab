@@ -4,7 +4,8 @@ import type {
   EvaluationRun,
   ProviderKind,
   ResultReview,
-  TestSuite
+  TestSuite,
+  TurnResult
 } from "../types";
 
 export type PublicationMetadata = {
@@ -40,10 +41,14 @@ export type PublishedCaseResult = {
   status: CaseResult["status"];
   error?: string;
   reviews?: PublishedReview[];
+  executionType?: "single_turn" | "multi_turn";
+  outcomePolicy?: "fail_on_any_turn";
+  turnResults?: Array<Omit<TurnResult, "error"> & { error?: string }>;
+  firstFailedTurn?: number;
 };
 
 export type EvaluationSubmission = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   submissionId: string;
   submittedAt: string;
   organization: "Safe AI for Humanity Foundation";
@@ -97,6 +102,7 @@ export function publicationIssues(run: EvaluationRun, suites: TestSuite[]): stri
     if (!result.suiteHash || !sha256Pattern.test(result.suiteHash)) issues.push(`${result.caseTitle} is missing a release-grade suite hash.`);
     if (snapshot?.contentHash && result.suiteHash && snapshot.contentHash !== result.suiteHash) issues.push(`${result.caseTitle} does not match its suite snapshot hash.`);
     if (result.response.length > 200_000) issues.push(`${result.caseTitle} has a response that exceeds the public submission size limit.`);
+    if (result.turnResults?.some((turn) => turn.prompt.length > 20_000 || turn.response.length > 200_000)) issues.push(`${result.caseTitle} has multi-turn evidence that exceeds the public submission size limit.`);
     if (result.outcomes.some((outcome) => outcome.explanation.length > 4_000)) issues.push(`${result.caseTitle} has evaluator evidence that exceeds the public submission size limit.`);
     if (result.reviews?.some((review) => review.reviewerType === "human" && (review.notes?.length ?? 0) > 10_000)) issues.push(`${result.caseTitle} has human review notes that exceed the public submission size limit.`);
     if (result.reviews?.some((review) => review.reviewerType === "model" && (review.rationale.length > 20_000 || review.rawResponse.length > 100_000))) issues.push(`${result.caseTitle} has model-assisted review evidence that exceeds the public submission size limit.`);
@@ -148,7 +154,14 @@ function publishResult(result: CaseResult): PublishedCaseResult {
     outcomes: result.outcomes,
     status: result.status,
     ...(result.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {}),
-    ...(result.reviews?.length ? { reviews: result.reviews.map(publishReview) } : {})
+    ...(result.reviews?.length ? { reviews: result.reviews.map(publishReview) } : {}),
+    ...(result.executionType ? { executionType: result.executionType } : {}),
+    ...(result.outcomePolicy ? { outcomePolicy: result.outcomePolicy } : {}),
+    ...(result.turnResults?.length ? { turnResults: result.turnResults.map((turn) => ({
+      ...turn,
+      ...(turn.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {})
+    })) } : {}),
+    ...(result.firstFailedTurn ? { firstFailedTurn: result.firstFailedTurn } : {})
   };
 }
 
@@ -175,7 +188,7 @@ export function buildEvaluationSubmission(
   });
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     submissionId: options.submissionId ?? crypto.randomUUID(),
     submittedAt: options.submittedAt ?? new Date().toISOString(),
     organization: "Safe AI for Humanity Foundation",

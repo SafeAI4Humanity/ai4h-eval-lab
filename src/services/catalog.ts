@@ -12,8 +12,9 @@ const evaluatorSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("valid_json") }),
   z.object({ type: z.literal("human_review"), rubric: z.string().min(1) })
 ]);
-const suiteSchema = z.object({
-  schemaVersion: z.literal(1),
+const parametersSchema = z
+  .object({ temperature: z.number().optional(), maxTokens: z.number().int().positive().optional(), seed: z.number().int().optional() });
+const suiteMetadataSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]+$/),
   version: z.string(),
   title: z.string(),
@@ -24,33 +25,58 @@ const suiteSchema = z.object({
   author: z.string(),
   tags: z.array(z.string()),
   sourceId: z.string().optional().default("external"),
-  contentHash: z.string().optional(),
+  contentHash: z.string().optional()
+});
+const singleTurnSuiteSchema = suiteMetadataSchema.extend({
+  schemaVersion: z.literal(1),
   cases: z.array(
     z.object({
       id: z.string(),
       title: z.string(),
       description: z.string().optional(),
       messages: z.array(messageSchema).min(1),
-      parameters: z
-        .object({ temperature: z.number().optional(), maxTokens: z.number().int().positive().optional(), seed: z.number().int().optional() })
-        .optional(),
+      parameters: parametersSchema.optional(),
       evaluators: z.array(evaluatorSchema).min(1)
     })
   ).min(1)
 });
+const multiTurnSuiteSchema = suiteMetadataSchema.extend({
+  schemaVersion: z.literal(2),
+  cases: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      description: z.string().optional(),
+      setup: z.array(messageSchema).optional(),
+      parameters: parametersSchema.optional(),
+      outcomePolicy: z.literal("fail_on_any_turn"),
+      turns: z.array(z.object({
+        id: z.string(),
+        title: z.string(),
+        prompt: z.string().min(1),
+        parameters: parametersSchema.optional(),
+        evaluators: z.array(evaluatorSchema).min(1)
+      })).min(2).max(8)
+    })
+  ).min(1)
+});
 const catalogSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   catalogVersion: z.string(),
   publishedAt: z.string(),
-  suites: z.array(suiteSchema)
+  suites: z.array(z.discriminatedUnion("schemaVersion", [singleTurnSuiteSchema, multiTurnSuiteSchema]))
 });
 
 export async function loadSource(source: CatalogSource): Promise<Catalog> {
   const response = await appFetch(source.url, { headers: { Accept: "application/json" } });
-  const parsed = catalogSchema.parse(await readJson(response));
+  return parseCatalog(await readJson(response), source.id);
+}
+
+export function parseCatalog(data: unknown, sourceId = "external"): Catalog {
+  const parsed = catalogSchema.parse(data);
   return {
     ...parsed,
-    suites: parsed.suites.map((suite) => ({ ...suite, sourceId: source.id })) as TestSuite[]
+    suites: parsed.suites.map((suite) => ({ ...suite, sourceId })) as TestSuite[]
   };
 }
 

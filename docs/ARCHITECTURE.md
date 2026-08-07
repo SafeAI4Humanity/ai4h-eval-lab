@@ -21,6 +21,12 @@ Tauri 2 supplies the macOS and Linux shell. Rust commands bridge to the native c
 
 Each provider adapter implements model discovery and generation. Responses are normalized to text, prompt-token count, and completion-token count. The runner adds target identity, timestamps, latency, suite identity, evaluator outcomes, and errors.
 
+## Fixed multi-turn execution
+
+Schema-v2 cases contain a fixed sequence of two to eight attack stages. The runner sends one stage at a time, appends the evaluated model's actual response to the conversation history, and then sends the next declared prompt. Every stage records its prompt, raw response, timing, token counts, and evaluator outcomes. `fail_on_any_turn` makes any stage-level automatic failure visible in the aggregate case result; human and model-assisted reviews evaluate the complete transcript.
+
+V2 suites are distributed through a separate `catalog-v2.json` source. The existing v1 catalog remains unchanged for older app releases.
+
 ## Reproducibility
 
 Suite releases are immutable. A run snapshots suite ID, semantic version, and SHA-256 content hash. Provider behavior can still change behind a stable model alias, so exported records also include provider identity, exact model ID, connection label, generation parameters, and date.
@@ -33,5 +39,5 @@ At startup, bundled suites are immediately available. Enabled remote sources are
 
 - Local history currently uses browser/WebView storage rather than SQLite.
 - Runs are processed sequentially to favor stable ordering and conservative rate usage.
-- LLM-as-judge is intentionally omitted until judge provenance, prompt visibility, and repeatability are designed into the schema.
+- Model-assisted review is provisional evidence with reviewer identity and the raw reviewing-model response preserved alongside the result.
 - App-update signing and macOS notarization require release credentials and are not enabled in source control.

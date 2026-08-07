@@ -44,7 +44,7 @@ import {
 import { bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
 import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
-import { executeRun, runSummary, type RunProgress } from "./services/runner";
+import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
 import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
@@ -543,6 +543,7 @@ function TestLibrary({ suites, sources, onRunSuite }: { suites: TestSuite[]; sou
 function SuiteCard({ suite, onRun, onInspect }: { suite: TestSuite; onRun: () => void; onInspect: () => void }) {
   const categoryIcon = suite.category.includes("injection") ? ShieldCheck : suite.category.includes("ground") ? BookOpen : TestTube2;
   const Icon = categoryIcon;
+  const official = suite.sourceId === "bundled" || suite.sourceId.startsWith("ai4h-official");
   return (
     <article className="suite-card">
       <div className="suite-top">
@@ -553,14 +554,15 @@ function SuiteCard({ suite, onRun, onInspect }: { suite: TestSuite; onRun: () =>
         </div>
       </div>
       <span className="suite-category">{suite.category}</span>
+      {suite.schemaVersion === 2 && <span className="multi-turn-badge">Multi-turn · v2</span>}
       <h3>{suite.title}</h3>
       <p>{suite.summary}</p>
       <div className="tag-list">{suite.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>
       <div className="suite-meta">
-        <span><TestTube2 size={14} /> {suite.cases.length} tests</span>
+        <span><TestTube2 size={14} /> {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages` : ""}</span>
         <span>v{suite.version}</span>
-        <span className={suite.sourceId === "bundled" || suite.sourceId === "ai4h-official" ? "verified" : ""}>
-          {suite.sourceId === "bundled" || suite.sourceId === "ai4h-official" ? <><ShieldCheck size={14} /> AI4H</> : "Community"}
+        <span className={official ? "verified" : ""}>
+          {official ? <><ShieldCheck size={14} /> AI4H</> : "Community"}
         </span>
       </div>
       <div className="suite-footer">
@@ -578,10 +580,15 @@ function SuiteInspector({ suite, onClose }: { suite: TestSuite; onClose: () => v
         <div className="inspector-summary"><p>{suite.summary}</p><span>{suite.id}</span><span>{suite.contentHash ?? "No content hash supplied"}</span></div>
         {suite.cases.map((testCase) => (
           <section className="inspector-case" key={testCase.id}>
-            <div className="inspector-case-heading"><div><span>Test case</span><h3>{testCase.title}</h3></div><code>{testCase.id}</code></div>
-            <div className="inspector-block"><strong>Messages sent to the model</strong>{testCase.messages.map((message, index) => <div className="inspector-message" key={index}><span>{message.role}</span><p>{message.content}</p></div>)}</div>
+            <div className="inspector-case-heading"><div><span>{"turns" in testCase ? `Multi-turn test · ${testCase.turns.length} stages` : "Test case"}</span><h3>{testCase.title}</h3></div><code>{testCase.id}</code></div>
+            {"turns" in testCase ? <>
+              {testCase.setup?.length ? <div className="inspector-block"><strong>Conversation setup</strong>{testCase.setup.map((message, index) => <div className="inspector-message" key={index}><span>{message.role}</span><p>{message.content}</p></div>)}</div> : null}
+              <div className="inspector-turn-list">{testCase.turns.map((turn, turnIndex) => <section className="inspector-turn" key={turn.id}><div><span>Stage {turnIndex + 1}</span><strong>{turn.title}</strong></div><div className="inspector-message"><span>user</span><p>{turn.prompt}</p></div><div className="inspector-block compact"><strong>Stage criteria</strong>{turn.evaluators.map((evaluator, index) => <div className="inspector-rule" key={index}><span>{evaluator.type.replaceAll("_", " ")}</span><p>{formatEvaluatorCriteria(evaluator)}</p></div>)}</div></section>)}</div>
+            </> : <>
+              <div className="inspector-block"><strong>Messages sent to the model</strong>{testCase.messages.map((message, index) => <div className="inspector-message" key={index}><span>{message.role}</span><p>{message.content}</p></div>)}</div>
+              <div className="inspector-block"><strong>Evaluation criteria</strong>{testCase.evaluators.map((evaluator, index) => <div className="inspector-rule" key={index}><span>{evaluator.type.replaceAll("_", " ")}</span><p>{formatEvaluatorCriteria(evaluator)}</p></div>)}</div>
+            </>}
             <div className="inspector-parameters"><span>Temperature <strong>{testCase.parameters?.temperature ?? "provider default"}</strong></span><span>Max tokens <strong>{testCase.parameters?.maxTokens ?? "provider default"}</strong></span><span>Seed <strong>{testCase.parameters?.seed ?? "not set"}</strong></span></div>
-            <div className="inspector-block"><strong>Evaluation criteria</strong>{testCase.evaluators.map((evaluator, index) => <div className="inspector-rule" key={index}><span>{evaluator.type.replaceAll("_", " ")}</span><p>{formatEvaluatorCriteria(evaluator)}</p></div>)}</div>
           </section>
         ))}
         <div className="modal-actions"><button className="button button-primary" onClick={onClose}>Done</button></div>
@@ -595,7 +602,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
   const [targets, setTargets] = useState<Array<{ connectionId: string; model: string }>>([]);
   const [name, setName] = useState(`Model safety evaluation · ${new Date().toLocaleDateString()}`);
   const selectedSuites = suites.filter((suite) => selectedSuiteIds.includes(suite.id));
-  const totalCases = selectedSuites.reduce((sum, suite) => sum + suite.cases.length, 0) * Math.max(targets.length, 1);
+  const totalRequests = selectedSuites.reduce((sum, suite) => sum + suiteRequestCount(suite), 0) * Math.max(targets.length, 1);
 
   const toggleSuite = (id: string) => setSelectedSuiteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const addTarget = (connection: Connection) => {
@@ -631,7 +638,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
               {suites.map((suite) => (
                 <button key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} onClick={() => toggleSuite(suite.id)}>
                   <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
-                  <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests · v{suite.version}</small></span>
+                  <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : ""} · v{suite.version}</small></span>
                   <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
                 </button>
               ))}
@@ -676,7 +683,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
           <div className="summary-line"><span>Suites</span><strong>{selectedSuites.length}</strong></div>
           <div className="summary-line"><span>Individual tests</span><strong>{selectedSuites.reduce((sum, suite) => sum + suite.cases.length, 0)}</strong></div>
           <div className="summary-line"><span>Model targets</span><strong>{targets.length}</strong></div>
-          <div className="summary-line total"><span>Total requests</span><strong>{targets.length ? totalCases : 0}</strong></div>
+          <div className="summary-line total"><span>Total requests</span><strong>{targets.length ? totalRequests : 0}</strong></div>
           <div className="privacy-callout"><ShieldCheck size={18} /><div><strong>Evidence-first record</strong><span>Provider, model ID, parameters, suite versions, raw responses, and timing will be recorded locally.</span></div></div>
           <button className="button button-primary button-full" disabled={!selectedSuites.length || !targets.length || targets.some((target) => !target.model.trim())} onClick={start}>
             <Play size={16} fill="currentColor" /> Start evaluation
@@ -700,7 +707,7 @@ function LiveRun({ run, progress, onCancel, onResults }: { run: EvaluationRun | 
       <div className="live-layout">
         <section className="panel progress-panel">
           <div className="progress-header">
-            <div className={`live-status ${done ? "done" : ""}`}>{done ? <CheckCircle2 size={20} /> : <LoaderCircle className="spinning" size={20} />}<div><strong>{done ? "Evaluation complete" : "Evaluation in progress"}</strong><span>{progress.completed} of {progress.total} requests processed</span></div></div>
+            <div className={`live-status ${done ? "done" : ""}`}>{done ? <CheckCircle2 size={20} /> : <LoaderCircle className="spinning" size={20} />}<div><strong>{done ? "Evaluation complete" : "Evaluation in progress"}</strong><span>{progress.completed} of {progress.total} requests processed{!done && progress.current ? ` · ${progress.current}` : ""}</span></div></div>
             <strong className="progress-percent">{percent}%</strong>
           </div>
           <div className="progress-track"><span style={{ width: `${percent}%` }} /></div>
@@ -803,7 +810,7 @@ function Results({
                 const review = latestReview(result);
                 return <div className="result-record" key={result.id}>
                   <button className="result-record-row" onClick={() => setExpanded(expanded === result.id ? null : result.id)}>
-                    <span><i className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={12} /> : result.status === "review" ? <CircleHelp size={12} /> : <X size={12} />}</i><span><strong>{result.caseTitle}</strong><small>{result.suiteId} · v{result.suiteVersion}</small></span></span>
+                    <span><i className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={12} /> : result.status === "review" ? <CircleHelp size={12} /> : <X size={12} />}</i><span><strong>{result.caseTitle}</strong><small>{result.suiteId} · v{result.suiteVersion}{result.executionType === "multi_turn" ? ` · ${result.turnResults?.length ?? 0}-stage multi-turn` : ""}</small></span></span>
                     <span><strong>{result.target.model}</strong><small>{providerLabel(result.target.provider)}</small></span>
                     <span className="outcome-stack"><b className={`status-chip ${result.status}`}>{result.status}</b>{review && <small className={`review-verdict ${review.verdict}`}>{review.reviewerType === "human" ? "Human" : "Model"}: {reviewVerdictLabel(review.verdict)}</small>}</span>
                     <span>{result.latencyMs.toLocaleString()} ms</span>
@@ -811,9 +818,11 @@ function Results({
                   </button>
                   {expanded === result.id && (
                     <div className="result-detail">
-                      <ResultReviewContext result={result} />
-                      <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
-                      <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
+                      {result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
+                        <ResultReviewContext result={result} />
+                        <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
+                        <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
+                      </>}
                       <ResultReviewPanel result={result} connections={connections} onSave={(nextReview) => onSaveReview(selected.id, result.id, nextReview)} />
                       <small>Suite hash: {result.suiteHash ?? "not supplied"} · Started {new Date(result.startedAt).toISOString()}</small>
                     </div>
@@ -827,6 +836,32 @@ function Results({
       {bulkReviewOpen && <BulkReviewModal run={selected} connections={connections} onSave={onSaveReview} onClose={() => setBulkReviewOpen(false)} />}
       {publicationOpen && <PublicationModal run={selected} suites={suites} onClose={() => setPublicationOpen(false)} />}
     </>
+  );
+}
+
+function MultiTurnEvidence({ result }: { result: CaseResult }) {
+  const firstUserIndex = result.caseMessages?.findIndex((message) => message.role === "user") ?? -1;
+  const setupMessages = firstUserIndex > 0 ? result.caseMessages?.slice(0, firstUserIndex) ?? [] : [];
+  return (
+    <section className="multi-turn-evidence" aria-label="Multi-turn conversation evidence">
+      <div className="review-context-heading">
+        <div><h4>Fixed multi-turn attack</h4><p>The model's actual response is carried into each following stage</p></div>
+        <span>{result.firstFailedTurn ? `First indicator failure: stage ${result.firstFailedTurn}` : `${result.turnResults?.length ?? 0} stages completed`}</span>
+      </div>
+      {setupMessages.length > 0 && <div className="multi-turn-setup"><strong>Conversation setup</strong>{setupMessages.map((message, index) => <div className={`review-message ${message.role}`} key={index}><span>{message.role}</span><pre>{message.content}</pre></div>)}</div>}
+      <div className="multi-turn-stage-list">
+        {result.turnResults?.map((turn) => (
+          <article className="multi-turn-stage" key={turn.turnId}>
+            <div className="multi-turn-stage-heading"><span>Stage {turn.turnNumber}</span><div><strong>{turn.turnTitle}</strong><small>{turn.latencyMs.toLocaleString()} ms</small></div><b className={`status-chip ${turn.status}`}>{turn.status}</b></div>
+            <div className="multi-turn-exchange">
+              <div><h5>Attack prompt</h5><pre>{turn.prompt}</pre></div>
+              <div><h5>Model response</h5><pre>{turn.response || turn.error || "No response was recorded."}</pre></div>
+            </div>
+            <div className="multi-turn-outcomes"><h5>Stage evaluation criteria and evidence</h5>{turn.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}{!turn.outcomes.length && <p className="review-context-empty">No evaluator outcome was recorded for this stage.</p>}</div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

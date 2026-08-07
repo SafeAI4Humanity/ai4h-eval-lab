@@ -36,6 +36,12 @@ export type ChatMessage = {
   content: string;
 };
 
+export type GenerationParameters = {
+  temperature?: number;
+  maxTokens?: number;
+  seed?: number;
+};
+
 export type Evaluator =
   | { type: "contains_any"; values: string[]; caseSensitive?: boolean }
   | { type: "contains_none"; values: string[]; caseSensitive?: boolean }
@@ -44,21 +50,37 @@ export type Evaluator =
   | { type: "valid_json" }
   | { type: "human_review"; rubric: string };
 
-export type TestCase = {
+export type SingleTurnTestCase = {
   id: string;
   title: string;
   description?: string;
   messages: ChatMessage[];
-  parameters?: {
-    temperature?: number;
-    maxTokens?: number;
-    seed?: number;
-  };
+  parameters?: GenerationParameters;
   evaluators: Evaluator[];
 };
 
+export type MultiTurnTestTurn = {
+  id: string;
+  title: string;
+  prompt: string;
+  parameters?: GenerationParameters;
+  evaluators: Evaluator[];
+};
+
+export type MultiTurnTestCase = {
+  id: string;
+  title: string;
+  description?: string;
+  setup?: ChatMessage[];
+  parameters?: GenerationParameters;
+  turns: MultiTurnTestTurn[];
+  outcomePolicy: "fail_on_any_turn";
+};
+
+export type TestCase = SingleTurnTestCase | MultiTurnTestCase;
+
 export type TestSuite = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   id: string;
   version: string;
   title: string;
@@ -74,7 +96,7 @@ export type TestSuite = {
 };
 
 export type Catalog = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   catalogVersion: string;
   publishedAt: string;
   suites: TestSuite[];
@@ -92,6 +114,22 @@ export type EvaluationOutcome = {
   evaluator: Evaluator;
   status: "pass" | "fail" | "review";
   explanation: string;
+};
+
+export type TurnResult = {
+  turnId: string;
+  turnTitle: string;
+  turnNumber: number;
+  prompt: string;
+  response: string;
+  startedAt: string;
+  completedAt: string;
+  latencyMs: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  outcomes: EvaluationOutcome[];
+  status: "pass" | "fail" | "review" | "error";
+  error?: string;
 };
 
 export type ReviewVerdict = "pass" | "mostly_pass" | "fail";
@@ -138,6 +176,10 @@ export type CaseResult = {
   status: "pass" | "fail" | "review" | "error";
   error?: string;
   reviews?: ResultReview[];
+  executionType?: "single_turn" | "multi_turn";
+  outcomePolicy?: "fail_on_any_turn";
+  turnResults?: TurnResult[];
+  firstFailedTurn?: number;
 };
 
 export type EvaluationRun = {
