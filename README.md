@@ -11,7 +11,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 ## Current capabilities
 
 - Ollama, OpenRouter, Kie.ai, OpenAI, Anthropic, Google Gemini, and generic OpenAI-compatible endpoints
-- Automatic model discovery where the provider exposes a model-list API
+- Automatic model discovery where the provider exposes a model-list API, including a free-model-only OpenRouter filter
 - Curated Kie.ai text-model support for its documented GPT 5.2, Gemini 3 Pro, and Claude Opus 4.7 endpoints
 - Bundled offline starter suites plus official and third-party JSON catalogs
 - Data-only suite validation; catalog content is never executed

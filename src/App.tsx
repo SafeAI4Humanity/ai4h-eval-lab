@@ -102,6 +102,7 @@ const emptyConnection: Omit<Connection, "id"> & { apiKey: string } = {
   baseUrl: defaultBaseUrl("openai-compatible"),
   enabled: true,
   status: "untested",
+  openRouterFreeOnly: false,
   apiKey: ""
 };
 
@@ -810,8 +811,9 @@ function Results({
                   </button>
                   {expanded === result.id && (
                     <div className="result-detail">
+                      <ResultReviewContext result={result} />
                       <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
-                      <div><h4>Evaluator evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
+                      <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
                       <ResultReviewPanel result={result} connections={connections} onSave={(nextReview) => onSaveReview(selected.id, result.id, nextReview)} />
                       <small>Suite hash: {result.suiteHash ?? "not supplied"} · Started {new Date(result.startedAt).toISOString()}</small>
                     </div>
@@ -825,6 +827,46 @@ function Results({
       {bulkReviewOpen && <BulkReviewModal run={selected} connections={connections} onSave={onSaveReview} onClose={() => setBulkReviewOpen(false)} />}
       {publicationOpen && <PublicationModal run={selected} suites={suites} onClose={() => setPublicationOpen(false)} />}
     </>
+  );
+}
+
+function ResultReviewContext({ result }: { result: CaseResult }) {
+  return (
+    <section className="result-review-context" aria-label="Test context and evaluation criteria">
+      <div className="review-context-heading">
+        <div><h4>Test context</h4><p>Exact stored evidence for reviewing this response</p></div>
+        <span>{result.caseId}</span>
+      </div>
+      <div className="review-context-grid">
+        <div className="review-context-block">
+          <div className="review-context-title"><strong>Messages sent to the evaluated model</strong><small>{result.caseMessages?.length ?? 0} message{result.caseMessages?.length === 1 ? "" : "s"}</small></div>
+          {result.caseMessages?.length ? (
+            <div className="review-message-list">
+              {result.caseMessages.map((message, index) => (
+                <div className={`review-message ${message.role}`} key={`${message.role}-${index}`}>
+                  <span>{message.role}</span>
+                  <pre>{message.content}</pre>
+                </div>
+              ))}
+            </div>
+          ) : <p className="review-context-empty">The original messages were not stored with this older result.</p>}
+        </div>
+        <div className="review-context-block">
+          <div className="review-context-title"><strong>Evaluation criteria</strong><small>{result.outcomes.length} evaluator{result.outcomes.length === 1 ? "" : "s"}</small></div>
+          {result.outcomes.length ? (
+            <div className="review-criteria-list">
+              {result.outcomes.map((outcome, index) => (
+                <div className="review-criterion" key={index}>
+                  <span>{outcome.evaluator.type.replaceAll("_", " ")}</span>
+                  <p>{formatEvaluatorCriteria(outcome.evaluator)}</p>
+                  <pre>{JSON.stringify(outcome.evaluator, null, 2)}</pre>
+                </div>
+              ))}
+            </div>
+          ) : <p className="review-context-empty">No evaluator definitions were stored for this result.</p>}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1136,6 +1178,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
               <span><Bot size={14} /> {connection.models?.length ?? 0} available models</span>
               <span><Clock3 size={14} /> {connection.lastCheckedAt ? formatRelative(connection.lastCheckedAt) : "Never checked"}</span>
             </div>
+            {connection.provider === "openrouter" && connection.openRouterFreeOnly && <div className="connection-filter-badge">Free models only</div>}
             {connection.models && connection.models.length > 0 && <div className="model-preview">{connection.models.slice(0, 3).map((model) => <span key={model}>{model}</span>)}{connection.models.length > 3 && <span>+{connection.models.length - 3}</span>}</div>}
             {connection.modelHint && <div className="default-model"><span>Default model</span><strong>{connection.modelHint}</strong></div>}
             <div className="connection-actions">
@@ -1150,13 +1193,14 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
       {editing && (
         <Modal title={editing.id ? "Configure connection" : "Add connection"} onClose={() => setEditing(null)}>
           <div className="modal-form">
-            <label className="field"><span>Provider</span><select value={editing.provider} onChange={(event) => { const provider = event.target.value as ProviderKind; const models = provider === "kie" ? kieModelIds() : undefined; setModalMessage(null); setEditing({ ...editing, provider, baseUrl: defaultBaseUrl(provider), models, modelHint: models?.[0], status: "untested" }); }}>{providerOptions.map((option) => <option value={option.value} key={option.value}>{option.label} — {option.hint}</option>)}</select></label>
+            <label className="field"><span>Provider</span><select value={editing.provider} onChange={(event) => { const provider = event.target.value as ProviderKind; const models = provider === "kie" ? kieModelIds() : undefined; setModalMessage(null); setEditing({ ...editing, provider, baseUrl: defaultBaseUrl(provider), models, modelHint: models?.[0], status: "untested", openRouterFreeOnly: provider === "openrouter" ? false : undefined }); }}>{providerOptions.map((option) => <option value={option.value} key={option.value}>{option.label} — {option.hint}</option>)}</select></label>
             <label className="field"><span>Connection name</span><input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="Research account" /></label>
             <label className="field"><span>Base URL</span><input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} /></label>
             {editing.provider !== "ollama" && <label className="field"><span>API key {editing.id && <small>· leave blank to keep the current key</small>}</span><input type="password" value={editing.apiKey} onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })} placeholder="Stored securely" autoComplete="off" /></label>}
             {discoveryDetails(editing.provider) && (
               <div className="provider-discovery">
                 <div className="discovery-heading"><div className={`provider-discovery-mark ${editing.provider}`}><Bot size={18} /></div><div><strong>{discoveryDetails(editing.provider)?.title}</strong><span>{discoveryDetails(editing.provider)?.description}</span></div><button className="button button-secondary button-small" onClick={() => void scanEditingProvider()} disabled={scanningModal || !editing.baseUrl.trim() || (editing.provider !== "ollama" && !editing.id && !editing.apiKey.trim())}>{scanningModal ? <LoaderCircle className="spinning" size={15} /> : <RefreshCw size={15} />} {discoveryDetails(editing.provider)?.action}</button></div>
+                {editing.provider === "openrouter" && <label className="model-filter-option"><input type="checkbox" checked={editing.openRouterFreeOnly ?? false} onChange={(event) => { const openRouterFreeOnly = event.target.checked; setModalMessage("Load models to apply the updated OpenRouter filter."); setEditing({ ...editing, openRouterFreeOnly, models: undefined, modelHint: undefined, status: "untested" }); }} /><span><strong>Free models only</strong><small>Include only catalog models with zero prompt, completion, and request pricing.</small></span></label>}
                 {modalMessage && <p className={editing.status === "unavailable" ? "discovery-message error" : "discovery-message"}>{editing.status === "unavailable" ? <WifiOff size={14} /> : <CheckCircle2 size={14} />}{modalMessage}</p>}
                 {editing.models && editing.models.length > 0 ? (
                   <label className="field"><span>Default model</span><select value={editing.modelHint ?? editing.models[0]} onChange={(event) => setEditing({ ...editing, modelHint: event.target.value })}>{editing.models.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>

@@ -17,6 +17,7 @@ export type Connection = {
   status?: "connected" | "unavailable" | "untested";
   lastCheckedAt?: string;
   models?: string[];
+  openRouterFreeOnly?: boolean;
 };
 
 export type CatalogSource = {

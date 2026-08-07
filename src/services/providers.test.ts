@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertKieCreditResponse, kieModelIds, normalizeProviderBaseUrl, ollamaThinkingSetting, parseOllamaModels, parseOpenAIModels } from "./providers";
+import { assertKieCreditResponse, kieModelIds, normalizeProviderBaseUrl, ollamaThinkingSetting, parseOllamaModels, parseOpenAIModels, parseOpenRouterModels } from "./providers";
 
 describe("parseOllamaModels", () => {
   it("extracts installed model names from the Ollama tags response", () => {
@@ -26,6 +26,37 @@ describe("parseOpenAIModels", () => {
 
   it("ignores malformed catalog entries", () => {
     expect(parseOpenAIModels({ data: [null, {}, { id: 42 }, { id: "valid/model" }] })).toEqual(["valid/model"]);
+  });
+});
+
+describe("parseOpenRouterModels", () => {
+  const catalog = {
+    data: [
+      { id: "openrouter/free", pricing: { prompt: "0", completion: "0", request: "0" } },
+      { id: "vendor/free-model", pricing: { prompt: 0, completion: 0 } },
+      { id: "vendor/paid-output", pricing: { prompt: "0", completion: "0.000001", request: "0" } },
+      { id: "vendor/paid-request", pricing: { prompt: "0", completion: "0", request: "0.01" } },
+      { id: "vendor/unknown-price" },
+      null
+    ]
+  };
+
+  it("returns the complete valid OpenRouter catalog when the filter is off", () => {
+    expect(parseOpenRouterModels(catalog)).toEqual([
+      "openrouter/free",
+      "vendor/free-model",
+      "vendor/paid-output",
+      "vendor/paid-request",
+      "vendor/unknown-price"
+    ]);
+  });
+
+  it("keeps only models with zero prompt, completion, and request pricing", () => {
+    expect(parseOpenRouterModels(catalog, true)).toEqual(["openrouter/free", "vendor/free-model"]);
+  });
+
+  it("does not classify malformed or missing pricing as free", () => {
+    expect(parseOpenRouterModels({ data: [{ id: "missing" }, { id: "bad", pricing: { prompt: "free", completion: "0" } }] }, true)).toEqual([]);
   });
 });
 

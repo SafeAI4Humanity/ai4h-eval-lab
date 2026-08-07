@@ -47,6 +47,30 @@ export function parseOpenAIModels(data: unknown): string[] {
     .filter((model: unknown): model is string => typeof model === "string" && Boolean(model));
 }
 
+function isZeroPrice(value: unknown): boolean {
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  const price = Number(value);
+  return Number.isFinite(price) && price === 0;
+}
+
+export function parseOpenRouterModels(data: unknown, freeOnly = false): string[] {
+  if (!data || typeof data !== "object") return [];
+  const models = (data as JsonRecord).data;
+  if (!Array.isArray(models)) return [];
+  return models
+    .filter((model: unknown) => {
+      if (!model || typeof model !== "object") return false;
+      if (!freeOnly) return true;
+      const pricing = (model as JsonRecord).pricing;
+      if (!pricing || typeof pricing !== "object") return false;
+      return isZeroPrice(pricing.prompt)
+        && isZeroPrice(pricing.completion)
+        && (pricing.request === undefined || isZeroPrice(pricing.request));
+    })
+    .map((model: unknown) => model && typeof model === "object" ? (model as JsonRecord).id : "")
+    .filter((model: unknown): model is string => typeof model === "string" && Boolean(model));
+}
+
 export function parseOllamaModels(data: unknown): string[] {
   if (!data || typeof data !== "object") return [];
   const models = (data as JsonRecord).models;
@@ -158,7 +182,7 @@ export async function discoverModels(connection: Connection, secretOverride?: st
   if (connection.provider === "openrouter") {
     await request(connection, "/v1/key", {}, 10_000, secretOverride);
     const data = await request(connection, "/v1/models", {}, 10_000, secretOverride);
-    return parseOpenAIModels(data);
+    return parseOpenRouterModels(data, connection.openRouterFreeOnly ?? false);
   }
 
   if (connection.provider === "anthropic") {
