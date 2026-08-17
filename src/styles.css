@@ -230,6 +230,14 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .field input, .field select, .target-row input, .target-row select { height: 39px; }
 .field textarea { min-height: 88px; padding-top: 9px; padding-bottom: 9px; resize: vertical; line-height: 1.45; }
 .field input:focus, .field select:focus, .field textarea:focus, .target-row input:focus, .target-row select:focus { border-color: #63b7aa; box-shadow: 0 0 0 3px #e8f5f2; }
+.suite-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 9px 11px; border: 1px solid #dfe7e4; border-radius: 9px; background: #f8fbfa; }
+.select-all-tests { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; color: #415750; background: transparent; text-align: left; cursor: pointer; }
+.select-all-tests > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.select-all-tests strong { font-size: calc(10px * var(--font-scale)); }
+.select-all-tests small { color: #82918e; font-size: calc(8px * var(--font-scale)); }
+.select-all-tests:hover strong { color: var(--teal-700); }
+.select-all-tests:focus-visible { outline: 3px solid #d8efea; outline-offset: 4px; border-radius: 4px; }
+.select-all-tests.selected .check-box { border-color: var(--teal-700); background: var(--teal-700); }
 .suite-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .suite-picker > button { min-height: 61px; display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #dfe7e4; border-radius: 9px; color: inherit; background: white; text-align: left; cursor: pointer; }
 .suite-picker > button:hover { border-color: #a8c9c2; }

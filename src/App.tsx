@@ -602,9 +602,12 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
   const [targets, setTargets] = useState<Array<{ connectionId: string; model: string }>>([]);
   const [name, setName] = useState(`Model safety evaluation · ${new Date().toLocaleDateString()}`);
   const selectedSuites = suites.filter((suite) => selectedSuiteIds.includes(suite.id));
+  const allSuitesSelected = suites.length > 0 && suites.every((suite) => selectedSuiteIds.includes(suite.id));
+  const availableTestCount = suites.reduce((sum, suite) => sum + suite.cases.length, 0);
   const totalRequests = selectedSuites.reduce((sum, suite) => sum + suiteRequestCount(suite), 0) * Math.max(targets.length, 1);
 
   const toggleSuite = (id: string) => setSelectedSuiteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const toggleAllSuites = () => setSelectedSuiteIds(allSuitesSelected ? [] : [...new Set(suites.map((suite) => suite.id))]);
   const addTarget = (connection: Connection) => {
     const defaultModel = connection.modelHint ?? connection.models?.[0] ?? "";
     setTargets((current) => [...current, { connectionId: connection.id, model: defaultModel }]);
@@ -634,9 +637,16 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
           </section>
           <section className="panel builder-section">
             <div className="step-heading"><span>2</span><div><h3>Select test suites</h3><p>Suite contents and version hashes are stored with the result.</p></div><strong>{selectedSuiteIds.length} selected</strong></div>
+            <div className="suite-selection-toolbar">
+              <button type="button" className={`select-all-tests${allSuitesSelected ? " selected" : ""}`} aria-pressed={allSuitesSelected} onClick={toggleAllSuites}>
+                <span className="check-box">{allSuitesSelected && <Check size={14} />}</span>
+                <span><strong>{allSuitesSelected ? "All tests selected" : "Select all tests"}</strong><small>{availableTestCount} tests across {suites.length} suites</small></span>
+              </button>
+              {selectedSuiteIds.length > 0 && !allSuitesSelected && <button type="button" className="text-button" onClick={() => setSelectedSuiteIds([])}>Clear selection</button>}
+            </div>
             <div className="suite-picker">
               {suites.map((suite) => (
-                <button key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} onClick={() => toggleSuite(suite.id)}>
+                <button type="button" key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} aria-pressed={selectedSuiteIds.includes(suite.id)} onClick={() => toggleSuite(suite.id)}>
                   <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
                   <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : ""} · v{suite.version}</small></span>
                   <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
