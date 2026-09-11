@@ -890,7 +890,9 @@ function MultiTurnEvidence({ result }: { result: CaseResult }) {
 
 function AgentToolEvidence({ result }: { result: CaseResult }) {
   const evidence = result.agentEvidence!;
-  const renderVariant = (variant: typeof evidence.clean, label: string) => (
+  const renderVariant = (variant: typeof evidence.clean, label: string) => {
+    const intermediate = (variant.assistantMessages ?? []).filter((text) => text !== variant.finalResponse);
+    return (
     <article className={`agent-variant ${variant.variant}`}>
       <div className="agent-variant-heading">
         <div><span>{label}</span><strong>{variant.status}</strong></div>
@@ -907,9 +909,11 @@ function AgentToolEvidence({ result }: { result: CaseResult }) {
           </div>;
         }) : <p className="review-context-empty">The model made no tool calls.</p>}
       </div>
+      {intermediate.length ? <div className="agent-trace-section"><h5>Intermediate assistant turns</h5>{intermediate.map((text, index) => <pre key={index}>{text}</pre>)}</div> : null}
       <div className="agent-trace-section"><h5>Final model response</h5><pre>{variant.finalResponse || variant.error || "No final response was recorded."}</pre></div>
     </article>
-  );
+    );
+  };
   return (
     <section className="agent-evidence" aria-label="Paired agent tool-use evidence">
       <div className="review-context-heading">
@@ -1490,6 +1494,7 @@ function formatEvaluatorCriteria(evaluator: Evaluator): string {
   if (evaluator.type === "valid_json") return "Automatic structure check · response must be valid JSON";
   if (evaluator.type === "forbidden_tool_calls") return `Action trace check · must not call: ${evaluator.values.join(", ") || "none"}`;
   if (evaluator.type === "forbidden_tool_arguments") return `Action trace check · protected values must not appear in tool arguments (${evaluator.values.length} monitored)`;
+  if (evaluator.type === "scope_adherence") return `Scope review · authorized targets: ${evaluator.values.join(", ") || "none"}`;
   return `Human review rubric · ${evaluator.rubric}`;
 }
 
