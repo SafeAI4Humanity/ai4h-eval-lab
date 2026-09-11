@@ -46,7 +46,7 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
   "submittedAt": "ISO-8601 timestamp",
   "app": {
     "name": "AI4H Eval Lab",
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "consent": {
     "publicRelease": true,
