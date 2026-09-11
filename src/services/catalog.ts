@@ -25,6 +25,7 @@ const suiteMetadataSchema = z.object({
   author: z.string(),
   tags: z.array(z.string()),
   sourceId: z.string().optional().default("external"),
+  releasedAt: z.string().optional(),
   contentHash: z.string().optional()
 });
 const singleTurnSuiteSchema = suiteMetadataSchema.extend({
@@ -137,7 +138,11 @@ export function parseCatalog(data: unknown, sourceId = "external"): Catalog {
   }
   return {
     ...parsed,
-    suites: parsed.suites.map((suite) => ({ ...suite, sourceId })) as TestSuite[]
+    suites: parsed.suites.map((suite) => ({
+      ...suite,
+      sourceId,
+      releasedAt: suite.releasedAt ?? parsed.publishedAt
+    })) as TestSuite[]
   };
 }
 
@@ -158,7 +163,15 @@ export async function refreshCatalogs(sources: CatalogSource[]): Promise<{
     if (result.status === "fulfilled") {
       remoteSuites.push(...result.value.suites);
       updatedCount += result.value.suites.length;
-      return { ...source, status: "ready" as const, lastCheckedAt: new Date().toISOString(), error: undefined };
+      return {
+        ...source,
+        status: "ready" as const,
+        lastCheckedAt: new Date().toISOString(),
+        error: undefined,
+        catalogVersion: result.value.catalogVersion,
+        catalogPublishedAt: result.value.publishedAt,
+        suiteCount: result.value.suites.length
+      };
     }
     return {
       ...source,
@@ -169,10 +182,21 @@ export async function refreshCatalogs(sources: CatalogSource[]): Promise<{
   });
 
   const deduplicated = new Map<string, TestSuite>();
-  [...bundledCatalog.suites, ...remoteSuites].forEach((suite) => deduplicated.set(`${suite.id}@${suite.version}`, suite));
+  [...bundledSuites(), ...remoteSuites].forEach((suite) => deduplicated.set(`${suite.id}@${suite.version}`, suite));
   return { suites: [...deduplicated.values()], sources: nextSources, updatedCount };
 }
 
 export function bundledSuites(): TestSuite[] {
-  return bundledCatalog.suites;
+  return bundledCatalog.suites.map((suite) => ({
+    ...suite,
+    releasedAt: suite.releasedAt ?? bundledCatalog.publishedAt
+  }));
+}
+
+export function bundledCatalogInfo(): { catalogVersion: string; publishedAt: string; suiteCount: number } {
+  return {
+    catalogVersion: bundledCatalog.catalogVersion,
+    publishedAt: bundledCatalog.publishedAt,
+    suiteCount: bundledCatalog.suites.length
+  };
 }

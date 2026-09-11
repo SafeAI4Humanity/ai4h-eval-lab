@@ -29,6 +29,9 @@ export type CatalogSource = {
   status?: "ready" | "checking" | "error";
   lastCheckedAt?: string;
   error?: string;
+  catalogVersion?: string;
+  catalogPublishedAt?: string;
+  suiteCount?: number;
 };
 
 export type ChatMessage = {
@@ -128,6 +131,7 @@ export type TestSuite = {
   author: string;
   tags: string[];
   sourceId: string;
+  releasedAt?: string;
   contentHash?: string;
   runner?: { id: "@safeai4humanity/adversarial-mcp"; minimumVersion: string };
   cases: TestCase[];

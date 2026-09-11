@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCatalog } from "./catalog";
+import { bundledCatalogInfo, bundledSuites, parseCatalog } from "./catalog";
 
 const metadata = {
   id: "multi-turn.example",
@@ -96,5 +96,46 @@ describe("parseCatalog", () => {
         }))
       })).toThrow();
     }
+  });
+});
+
+describe("suite release dates", () => {
+  const singleTurnSuite = {
+    ...metadata,
+    id: "release.example",
+    schemaVersion: 1,
+    cases: [{
+      id: "only",
+      title: "Only case",
+      messages: [{ role: "user", content: "Hello." }],
+      evaluators: [{ type: "non_empty" }]
+    }]
+  };
+
+  it("falls back to the catalog publication date when a suite omits releasedAt", () => {
+    const catalog = parseCatalog({
+      schemaVersion: 1,
+      catalogVersion: "2026.09.1",
+      publishedAt: "2026-09-01T00:00:00Z",
+      suites: [singleTurnSuite]
+    }, "ai4h-official");
+    expect(catalog.suites[0].releasedAt).toBe("2026-09-01T00:00:00Z");
+  });
+
+  it("keeps an explicit per-suite releasedAt", () => {
+    const catalog = parseCatalog({
+      schemaVersion: 1,
+      catalogVersion: "2026.09.1",
+      publishedAt: "2026-09-01T00:00:00Z",
+      suites: [{ ...singleTurnSuite, releasedAt: "2026-03-14T00:00:00Z" }]
+    }, "ai4h-official");
+    expect(catalog.suites[0].releasedAt).toBe("2026-03-14T00:00:00Z");
+  });
+
+  it("stamps bundled suites and reports bundled catalog metadata", () => {
+    const info = bundledCatalogInfo();
+    expect(info.suiteCount).toBe(bundledSuites().length);
+    expect(info.catalogVersion).toBeTruthy();
+    expect(bundledSuites().every((suite) => Boolean(suite.releasedAt))).toBe(true);
   });
 });
