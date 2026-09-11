@@ -415,7 +415,12 @@ function textContent(value: unknown): string {
 function toolArguments(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   if (typeof value !== "string" || !value.trim()) return {};
-  const parsed: unknown = JSON.parse(value);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("The model returned invalid tool-call arguments.");
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The model returned invalid tool-call arguments.");
   return parsed as Record<string, unknown>;
 }

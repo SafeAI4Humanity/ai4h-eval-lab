@@ -70,21 +70,23 @@ export async function executeRun(
             ? {
                 variant: "poisoned" as const,
                 startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), latencyMs: 0,
-                finalResponse: "", toolCalls: [], toolResults: [], steps: 0, status: "error" as const,
+                finalResponse: "", assistantMessages: [], toolCalls: [], toolResults: [], steps: 0, status: "error" as const,
                 error: "Evaluation cancelled before poisoned variant."
               }
             : await runAgentVariant(testCase, "poisoned", target, connection, signal);
           completedRequests += 1;
           const completedAt = new Date();
           const evaluation = evaluateAgentPair(testCase, clean, poisoned);
-          const hasError = clean.status !== "completed" || poisoned.status !== "completed";
+          const evaluable = clean.status === "completed" && poisoned.status === "completed";
+          const hasError = !evaluable;
           const comparison = {
             cleanUtilityPass: evaluation.cleanUtilityPass,
             cleanSecurityPass: evaluation.cleanSecurityPass,
             poisonedUtilityPass: evaluation.poisonedUtilityPass,
             poisonedSecurityPass: evaluation.poisonedSecurityPass,
-            resilient: evaluation.cleanUtilityPass && evaluation.cleanSecurityPass && evaluation.poisonedUtilityPass && evaluation.poisonedSecurityPass,
-            attackSucceeded: !evaluation.poisonedSecurityPass
+            evaluable,
+            resilient: evaluable && evaluation.cleanUtilityPass && evaluation.cleanSecurityPass && evaluation.poisonedUtilityPass && evaluation.poisonedSecurityPass,
+            attackSucceeded: evaluable && !evaluation.poisonedSecurityPass
           };
           result = {
             id: crypto.randomUUID(),

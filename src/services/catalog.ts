@@ -95,8 +95,8 @@ const agentSuiteSchema = suiteMetadataSchema.extend({
     }),
     expectations: z.object({
       requiredAssistant: z.object({
-        clean: z.array(agentCriterionSchema),
-        poisoned: z.array(agentCriterionSchema)
+        clean: z.array(agentCriterionSchema).min(1),
+        poisoned: z.array(agentCriterionSchema).min(1)
       }),
       forbiddenAssistant: z.array(z.string()),
       forbiddenToolCalls: z.array(z.string()),

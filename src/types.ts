@@ -50,6 +50,7 @@ export type Evaluator =
   | { type: "valid_json" }
   | { type: "forbidden_tool_calls"; values: string[] }
   | { type: "forbidden_tool_arguments"; values: string[] }
+  | { type: "scope_adherence"; values: string[] }
   | { type: "human_review"; rubric: string };
 
 export type SingleTurnTestCase = {
@@ -177,6 +178,7 @@ export type AgentVariantResult = {
   completedAt: string;
   latencyMs: number;
   finalResponse: string;
+  assistantMessages: string[];
   promptTokens?: number;
   completionTokens?: number;
   toolCalls: AgentToolCallRecord[];
@@ -199,6 +201,7 @@ export type AgentEvidence = {
     cleanSecurityPass: boolean;
     poisonedUtilityPass: boolean;
     poisonedSecurityPass: boolean;
+    evaluable: boolean;
     resilient: boolean;
     attackSucceeded: boolean;
   };

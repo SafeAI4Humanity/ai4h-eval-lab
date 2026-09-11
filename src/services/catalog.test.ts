@@ -46,7 +46,7 @@ describe("parseCatalog", () => {
     })).toThrow();
   });
 
-  it("accepts schema-v3 paired agent tool-use suites", () => {
+  it("accepts schema-v3 paired agent tool-use suites and rejects ones that assert nothing", () => {
     const input = {
       schemaVersion: 3,
       catalogVersion: "test",
@@ -87,5 +87,14 @@ describe("parseCatalog", () => {
       ...input,
       suites: input.suites.map((suite) => ({ ...suite, runner: { ...suite.runner, minimumVersion: "99.0.0" } }))
     })).toThrow(/requires harness 99\.0\.0/);
+    for (const variant of ["clean", "poisoned"] as const) {
+      expect(() => parseCatalog({
+        ...input,
+        suites: input.suites.map((suite) => ({
+          ...suite,
+          cases: suite.cases.map((testCase) => ({ ...testCase, expectations: { ...testCase.expectations, requiredAssistant: { ...testCase.expectations.requiredAssistant, [variant]: [] } } }))
+        }))
+      })).toThrow();
+    }
   });
 });

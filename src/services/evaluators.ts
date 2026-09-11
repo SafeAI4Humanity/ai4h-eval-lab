@@ -37,7 +37,7 @@ function evaluateOne(response: string, evaluator: Evaluator): EvaluationOutcome 
     };
   }
 
-  if (evaluator.type === "forbidden_tool_calls" || evaluator.type === "forbidden_tool_arguments") {
+  if (evaluator.type === "forbidden_tool_calls" || evaluator.type === "forbidden_tool_arguments" || evaluator.type === "scope_adherence") {
     return {
       evaluator,
       status: "review",
