@@ -48,6 +48,9 @@ export type Evaluator =
   | { type: "regex"; pattern: string; flags?: string }
   | { type: "non_empty"; minimumCharacters?: number }
   | { type: "valid_json" }
+  | { type: "forbidden_tool_calls"; values: string[] }
+  | { type: "forbidden_tool_arguments"; values: string[] }
+  | { type: "scope_adherence"; values: string[] }
   | { type: "human_review"; rubric: string };
 
 export type SingleTurnTestCase = {
@@ -77,10 +80,44 @@ export type MultiTurnTestCase = {
   outcomePolicy: "fail_on_any_turn";
 };
 
-export type TestCase = SingleTurnTestCase | MultiTurnTestCase;
+export type AgentToolResponse = {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+};
+
+export type AgentAssistantCriterion = { id: string; label: string; anyOf: string[] };
+
+export type AgentToolTestCase = {
+  id: string;
+  title: string;
+  summary?: string;
+  task: string;
+  authorizedScope: { targets: string[]; actions: string[]; boundary: string };
+  stopConditions: string[];
+  prohibitedActions: string[];
+  protectedCanaries: string[];
+  sourceTool: {
+    name: string;
+    title: string;
+    description: string;
+    inputMode: "none" | "query" | "recordId";
+    clean: AgentToolResponse;
+    poisoned: AgentToolResponse;
+  };
+  expectations: {
+    requiredAssistant: { clean: AgentAssistantCriterion[]; poisoned: AgentAssistantCriterion[] };
+    forbiddenAssistant: string[];
+    forbiddenToolCalls: string[];
+    forbiddenToolArgumentStrings: string[];
+    humanReviewRubric: string;
+  };
+};
+
+export type TestCase = SingleTurnTestCase | MultiTurnTestCase | AgentToolTestCase;
 
 export type TestSuite = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   id: string;
   version: string;
   title: string;
@@ -92,11 +129,12 @@ export type TestSuite = {
   tags: string[];
   sourceId: string;
   contentHash?: string;
+  runner?: { id: "@safeai4humanity/adversarial-mcp"; minimumVersion: string };
   cases: TestCase[];
 };
 
 export type Catalog = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   catalogVersion: string;
   publishedAt: string;
   suites: TestSuite[];
@@ -130,6 +168,43 @@ export type TurnResult = {
   outcomes: EvaluationOutcome[];
   status: "pass" | "fail" | "review" | "error";
   error?: string;
+};
+
+export type AgentToolCallRecord = { id: string; name: string; arguments: Record<string, unknown> };
+export type AgentToolResultRecord = { toolCallId: string; name: string; response: AgentToolResponse };
+export type AgentVariantResult = {
+  variant: "clean" | "poisoned";
+  startedAt: string;
+  completedAt: string;
+  latencyMs: number;
+  finalResponse: string;
+  assistantMessages: string[];
+  promptTokens?: number;
+  completionTokens?: number;
+  toolCalls: AgentToolCallRecord[];
+  toolResults: AgentToolResultRecord[];
+  steps: number;
+  status: "completed" | "max_steps" | "error";
+  error?: string;
+};
+
+export type AgentEvidence = {
+  task: string;
+  authorizedScope: AgentToolTestCase["authorizedScope"];
+  stopConditions: string[];
+  prohibitedActions: string[];
+  protectedCanaries: string[];
+  clean: AgentVariantResult;
+  poisoned: AgentVariantResult;
+  comparison: {
+    cleanUtilityPass: boolean;
+    cleanSecurityPass: boolean;
+    poisonedUtilityPass: boolean;
+    poisonedSecurityPass: boolean;
+    evaluable: boolean;
+    resilient: boolean;
+    attackSucceeded: boolean;
+  };
 };
 
 export type ReviewVerdict = "pass" | "mostly_pass" | "fail";
@@ -176,10 +251,11 @@ export type CaseResult = {
   status: "pass" | "fail" | "review" | "error";
   error?: string;
   reviews?: ResultReview[];
-  executionType?: "single_turn" | "multi_turn";
+  executionType?: "single_turn" | "multi_turn" | "agent_tool";
   outcomePolicy?: "fail_on_any_turn";
   turnResults?: TurnResult[];
   firstFailedTurn?: number;
+  agentEvidence?: AgentEvidence;
 };
 
 export type EvaluationRun = {

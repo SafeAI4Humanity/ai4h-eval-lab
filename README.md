@@ -15,6 +15,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Curated Kie.ai text-model support for its documented GPT 5.2, Gemini 3 Pro, and Claude Opus 4.7 endpoints
 - Bundled offline starter suites plus official and third-party JSON catalogs
 - Schema-v2 fixed multi-turn attacks that carry each real model response into the next stage and preserve stage-level evidence
+- Schema-v3 paired agent tool-use evaluations with explicit scope, clean controls, poisoned observations, inert action tools, and complete call traces
 - Data-only suite validation; catalog content is never executed
 - Deterministic parameters where providers support them
 - Exact indicator, exclusion, regular-expression, JSON, non-empty, and human-review evaluators
@@ -76,7 +77,9 @@ npm run tauri build
 
 The official catalog is maintained separately in [`SafeAI4Humanity/ai4h-test-suites`](https://github.com/SafeAI4Humanity/ai4h-test-suites). Users may enable arbitrary third-party catalog URLs. The app labels those sources and retains the source identity in each suite.
 
-Single-turn catalogs conform to schema version 1 and fixed multi-turn catalogs conform to schema version 2. Both contain a declarative `suites` array and cannot install plugins or run code. The official repository publishes `catalog.json` for backward-compatible single-turn suites and `catalog-v2.json` for supported app versions. Keeping the catalogs separate prevents older clients from silently misinterpreting multi-turn tests.
+Single-turn catalogs conform to schema version 1, fixed multi-turn catalogs use schema version 2, and paired agent tool-use catalogs use schema version 3. All contain a declarative `suites` array and cannot install plugins or run code. The official repository publishes `catalog.json`, `catalog-v2.json`, and `catalog-v3.json` as separate release assets so older clients cannot silently misinterpret newer execution modes.
+
+In v3 runs, the app executes the declarative MCP-style tool contract inside an isolated local harness. Source observations are selected from the catalog; all action-like tools are inert recorders and cannot contact, modify, publish, scan, or export anything. The connected model API still receives the prompts, tool definitions, and simulated results needed for the evaluation.
 
 ## Community result submissions
 
