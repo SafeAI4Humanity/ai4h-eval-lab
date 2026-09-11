@@ -387,6 +387,225 @@ export async function generateResponse(connection: Connection, options: RequestO
   };
 }
 
+export type AgentToolDefinition = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+};
+
+export type AgentConversationMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: AgentProviderToolCall[] }
+  | { role: "tool"; toolCallId: string; name: string; content: string };
+
+export type AgentProviderToolCall = {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+export type AgentProviderTurn = ProviderResponse & { toolCalls: AgentProviderToolCall[] };
+
+function textContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map((part) => part && typeof part === "object" && typeof (part as JsonRecord).text === "string" ? (part as JsonRecord).text : "").join("");
+}
+
+function toolArguments(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value.trim()) return {};
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("The model returned invalid tool-call arguments.");
+  return parsed as Record<string, unknown>;
+}
+
+function openAiMessages(messages: AgentConversationMessage[]): JsonRecord[] {
+  return messages.map((message) => {
+    if (message.role === "tool") return { role: "tool", tool_call_id: message.toolCallId, name: message.name, content: message.content };
+    if (message.role === "assistant" && message.toolCalls?.length) return {
+      role: "assistant",
+      content: message.content || null,
+      tool_calls: message.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) }
+      }))
+    };
+    return { role: message.role, content: message.content };
+  });
+}
+
+export function parseOpenAiAgentTurn(data: JsonRecord): AgentProviderTurn {
+  const message = data.choices?.[0]?.message ?? data.message ?? {};
+  const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  return {
+    text: textContent(message.content),
+    toolCalls: calls.map((call: JsonRecord) => ({
+      id: typeof call.id === "string" ? call.id : crypto.randomUUID(),
+      name: String(call.function?.name ?? ""),
+      arguments: toolArguments(call.function?.arguments)
+    })).filter((call: AgentProviderToolCall) => Boolean(call.name)),
+    promptTokens: data.usage?.prompt_tokens ?? data.prompt_eval_count,
+    completionTokens: data.usage?.completion_tokens ?? data.eval_count
+  };
+}
+
+function anthropicMessages(messages: AgentConversationMessage[]): JsonRecord[] {
+  return messages.filter((message) => message.role !== "system").map((message) => {
+    if (message.role === "tool") return {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: message.toolCallId, content: message.content }]
+    };
+    if (message.role === "assistant" && message.toolCalls?.length) return {
+      role: "assistant",
+      content: [
+        ...(message.content ? [{ type: "text", text: message.content }] : []),
+        ...message.toolCalls.map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: call.arguments }))
+      ]
+    };
+    return { role: message.role, content: message.content };
+  });
+}
+
+export function parseAnthropicAgentTurn(data: JsonRecord): AgentProviderTurn {
+  const parts = Array.isArray(data.content) ? data.content : [];
+  return {
+    text: parts.filter((part: JsonRecord) => part.type === "text").map((part: JsonRecord) => String(part.text ?? "")).join("\n"),
+    toolCalls: parts.filter((part: JsonRecord) => part.type === "tool_use").map((part: JsonRecord) => ({
+      id: String(part.id ?? crypto.randomUUID()),
+      name: String(part.name ?? ""),
+      arguments: toolArguments(part.input)
+    })),
+    promptTokens: data.usage?.input_tokens,
+    completionTokens: data.usage?.output_tokens
+  };
+}
+
+function geminiContents(messages: AgentConversationMessage[]): JsonRecord[] {
+  return messages.filter((message) => message.role !== "system").map((message) => {
+    if (message.role === "tool") return {
+      role: "user",
+      parts: [{ functionResponse: { name: message.name, response: { content: message.content } } }]
+    };
+    if (message.role === "assistant") return {
+      role: "model",
+      parts: [
+        ...(message.content ? [{ text: message.content }] : []),
+        ...(message.toolCalls ?? []).map((call) => ({ functionCall: { name: call.name, args: call.arguments, id: call.id } }))
+      ]
+    };
+    return { role: "user", parts: [{ text: message.content }] };
+  });
+}
+
+/** Runs one model turn with declarative tools. Tool execution remains in the local runner. */
+export async function generateAgentTurn(
+  connection: Connection,
+  options: {
+    model: string;
+    messages: AgentConversationMessage[];
+    tools: AgentToolDefinition[];
+    temperature?: number;
+    maxTokens?: number;
+    signal?: AbortSignal;
+  }
+): Promise<AgentProviderTurn> {
+  const system = options.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+
+  if (connection.provider === "ollama") {
+    const messages = options.messages.map((message) => {
+      if (message.role === "tool") return { role: "tool", tool_name: message.name, content: message.content };
+      if (message.role === "assistant" && message.toolCalls?.length) return {
+        role: "assistant",
+        content: message.content,
+        tool_calls: message.toolCalls.map((call) => ({ function: { name: call.name, arguments: call.arguments } }))
+      };
+      return { role: message.role, content: message.content };
+    });
+    const data = await request(connection, "/api/chat", {
+      method: "POST",
+      signal: options.signal,
+      body: JSON.stringify({
+        model: options.model,
+        messages,
+        tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
+        think: ollamaThinkingSetting(options.model),
+        stream: false,
+        options: { temperature: options.temperature ?? 0, num_predict: options.maxTokens ?? 800 }
+      })
+    }) as JsonRecord;
+    return parseOpenAiAgentTurn(data);
+  }
+
+  if (connection.provider === "anthropic" || (connection.provider === "kie" && KIE_MODELS.find((model) => model.id === options.model)?.protocol === "anthropic")) {
+    const path = connection.provider === "kie"
+      ? KIE_MODELS.find((model) => model.id === options.model)!.endpoint
+      : "/v1/messages";
+    const data = await request(connection, path, {
+      method: "POST",
+      signal: options.signal,
+      body: JSON.stringify({
+        model: options.model,
+        system: system || undefined,
+        messages: anthropicMessages(options.messages),
+        tools: options.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema })),
+        temperature: options.temperature ?? 0,
+        max_tokens: options.maxTokens ?? 800,
+        stream: false
+      })
+    }) as JsonRecord;
+    return parseAnthropicAgentTurn(data);
+  }
+
+  if (connection.provider === "gemini") {
+    const secret = await getSecret(connection.id);
+    const response = await appFetch(
+      `${normalizeBaseUrl(connection.baseUrl)}/v1beta/models/${encodeURIComponent(options.model)}:generateContent?key=${encodeURIComponent(secret)}`,
+      {
+        method: "POST",
+        signal: options.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+          contents: geminiContents(options.messages),
+          tools: [{ functionDeclarations: options.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })) }],
+          generationConfig: { temperature: options.temperature ?? 0, maxOutputTokens: options.maxTokens ?? 800 }
+        })
+      }
+    );
+    const data = await readJson(response) as JsonRecord;
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    return {
+      text: parts.filter((part: JsonRecord) => typeof part.text === "string").map((part: JsonRecord) => part.text).join(""),
+      toolCalls: parts.filter((part: JsonRecord) => part.functionCall).map((part: JsonRecord) => ({
+        id: String(part.functionCall.id ?? crypto.randomUUID()),
+        name: String(part.functionCall.name ?? ""),
+        arguments: toolArguments(part.functionCall.args)
+      })),
+      promptTokens: data.usageMetadata?.promptTokenCount,
+      completionTokens: data.usageMetadata?.candidatesTokenCount
+    };
+  }
+
+  const selectedKie = connection.provider === "kie" ? KIE_MODELS.find((model) => model.id === options.model) : undefined;
+  if (connection.provider === "kie" && !selectedKie) throw new Error(`Unsupported Kie.ai model ID: ${options.model}.`);
+  const data = await request(connection, selectedKie?.endpoint ?? "/v1/chat/completions", {
+    method: "POST",
+    signal: options.signal,
+    body: JSON.stringify({
+      model: options.model,
+      messages: openAiMessages(options.messages),
+      tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
+      tool_choice: "auto",
+      temperature: options.temperature ?? 0,
+      max_tokens: options.maxTokens ?? 800,
+      stream: false
+    })
+  }) as JsonRecord;
+  return parseOpenAiAgentTurn(data);
+}
+
 export function providerLabel(provider: Connection["provider"]): string {
   return {
     ollama: "Ollama",

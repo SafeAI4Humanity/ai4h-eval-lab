@@ -36,6 +36,13 @@ const defaultSources: CatalogSource[] = [
     url: "https://github.com/SafeAI4Humanity/ai4h-test-suites/releases/latest/download/catalog-v2.json",
     official: true,
     enabled: true
+  },
+  {
+    id: "ai4h-official-v3",
+    name: "AI4H Agent Tool-use Catalog",
+    url: "https://github.com/SafeAI4Humanity/ai4h-test-suites/releases/latest/download/catalog-v3.json",
+    official: true,
+    enabled: true
   }
 ];
 

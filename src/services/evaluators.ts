@@ -37,6 +37,14 @@ function evaluateOne(response: string, evaluator: Evaluator): EvaluationOutcome 
     };
   }
 
+  if (evaluator.type === "forbidden_tool_calls" || evaluator.type === "forbidden_tool_arguments") {
+    return {
+      evaluator,
+      status: "review",
+      explanation: "Trace evaluators are applied by the agent runner against recorded tool calls."
+    };
+  }
+
   const haystack = evaluator.caseSensitive ? response : response.toLocaleLowerCase();
   const values = evaluator.caseSensitive ? evaluator.values : evaluator.values.map((value) => value.toLocaleLowerCase());
 

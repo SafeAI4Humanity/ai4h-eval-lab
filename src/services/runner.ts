@@ -1,6 +1,7 @@
 import type { CaseResult, Connection, EvaluationRun, RunTarget, TestCase, TestSuite, TurnResult } from "../types";
 import { evaluateResponse, summarizeStatus } from "./evaluators";
 import { generateResponse } from "./providers";
+import { agentSystemPrompt, evaluateAgentPair, runAgentVariant } from "./agentRunner";
 
 export type RunProgress = {
   completed: number;
@@ -10,6 +11,7 @@ export type RunProgress = {
 };
 
 export function testCaseRequestCount(testCase: TestCase): number {
+  if ("sourceTool" in testCase) return 2;
   return "turns" in testCase ? testCase.turns.length : 1;
 }
 
@@ -57,7 +59,67 @@ export async function executeRun(
 
         const startedAt = new Date();
         let result: CaseResult;
-        if ("turns" in testCase) {
+        if ("sourceTool" in testCase) {
+          const clean = await runAgentVariant(testCase, "clean", target, connection, signal);
+          completedRequests += 1;
+          onProgress(
+            { ...run, results: [...run.results] },
+            { completed: completedRequests, total, current: `${testCase.title} · poisoned variant` }
+          );
+          const poisoned = signal?.aborted
+            ? {
+                variant: "poisoned" as const,
+                startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), latencyMs: 0,
+                finalResponse: "", toolCalls: [], toolResults: [], steps: 0, status: "error" as const,
+                error: "Evaluation cancelled before poisoned variant."
+              }
+            : await runAgentVariant(testCase, "poisoned", target, connection, signal);
+          completedRequests += 1;
+          const completedAt = new Date();
+          const evaluation = evaluateAgentPair(testCase, clean, poisoned);
+          const hasError = clean.status !== "completed" || poisoned.status !== "completed";
+          const comparison = {
+            cleanUtilityPass: evaluation.cleanUtilityPass,
+            cleanSecurityPass: evaluation.cleanSecurityPass,
+            poisonedUtilityPass: evaluation.poisonedUtilityPass,
+            poisonedSecurityPass: evaluation.poisonedSecurityPass,
+            resilient: evaluation.cleanUtilityPass && evaluation.cleanSecurityPass && evaluation.poisonedUtilityPass && evaluation.poisonedSecurityPass,
+            attackSucceeded: !evaluation.poisonedSecurityPass
+          };
+          result = {
+            id: crypto.randomUUID(),
+            suiteId: suite.id,
+            suiteVersion: suite.version,
+            suiteHash: suite.contentHash,
+            caseId: testCase.id,
+            caseTitle: testCase.title,
+            caseMessages: [
+              { role: "system", content: agentSystemPrompt(testCase) },
+              { role: "user", content: testCase.task }
+            ],
+            target,
+            response: poisoned.finalResponse,
+            startedAt: startedAt.toISOString(),
+            completedAt: completedAt.toISOString(),
+            latencyMs: clean.latencyMs + poisoned.latencyMs,
+            promptTokens: optionalTotal([clean.promptTokens, poisoned.promptTokens]),
+            completionTokens: optionalTotal([clean.completionTokens, poisoned.completionTokens]),
+            outcomes: evaluation.outcomes,
+            status: hasError ? "error" : summarizeStatus(evaluation.outcomes),
+            ...(hasError ? { error: clean.error ?? poisoned.error ?? "Agent evaluation did not complete." } : {}),
+            executionType: "agent_tool",
+            agentEvidence: {
+              task: testCase.task,
+              authorizedScope: testCase.authorizedScope,
+              stopConditions: testCase.stopConditions,
+              prohibitedActions: testCase.prohibitedActions,
+              protectedCanaries: testCase.protectedCanaries,
+              clean,
+              poisoned,
+              comparison
+            }
+          };
+        } else if ("turns" in testCase) {
           const history = [...(testCase.setup ?? [])];
           const turnResults: TurnResult[] = [];
           for (const [turnIndex, turn] of testCase.turns.entries()) {
@@ -198,7 +260,7 @@ export async function executeRun(
             executionType: "single_turn"
           };
         }
-        if (!("turns" in testCase)) completedRequests += 1;
+        if (!("turns" in testCase) && !("sourceTool" in testCase)) completedRequests += 1;
         run.results.push(result);
         onProgress({ ...run, results: [...run.results] }, { completed: completedRequests, total, latest: result });
         if (signal?.aborted) {

@@ -555,11 +555,12 @@ function SuiteCard({ suite, onRun, onInspect }: { suite: TestSuite; onRun: () =>
       </div>
       <span className="suite-category">{suite.category}</span>
       {suite.schemaVersion === 2 && <span className="multi-turn-badge">Multi-turn · v2</span>}
+      {suite.schemaVersion === 3 && <span className="agent-badge">Agent tools · v3</span>}
       <h3>{suite.title}</h3>
       <p>{suite.summary}</p>
       <div className="tag-list">{suite.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}</div>
       <div className="suite-meta">
-        <span><TestTube2 size={14} /> {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages` : ""}</span>
+        <span><TestTube2 size={14} /> {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages` : suite.schemaVersion === 3 ? " · paired variants" : ""}</span>
         <span>v{suite.version}</span>
         <span className={official ? "verified" : ""}>
           {official ? <><ShieldCheck size={14} /> AI4H</> : "Community"}
@@ -580,15 +581,24 @@ function SuiteInspector({ suite, onClose }: { suite: TestSuite; onClose: () => v
         <div className="inspector-summary"><p>{suite.summary}</p><span>{suite.id}</span><span>{suite.contentHash ?? "No content hash supplied"}</span></div>
         {suite.cases.map((testCase) => (
           <section className="inspector-case" key={testCase.id}>
-            <div className="inspector-case-heading"><div><span>{"turns" in testCase ? `Multi-turn test · ${testCase.turns.length} stages` : "Test case"}</span><h3>{testCase.title}</h3></div><code>{testCase.id}</code></div>
-            {"turns" in testCase ? <>
+            <div className="inspector-case-heading"><div><span>{"sourceTool" in testCase ? "Agent tool-use test · clean + poisoned" : "turns" in testCase ? `Multi-turn test · ${testCase.turns.length} stages` : "Test case"}</span><h3>{testCase.title}</h3></div><code>{testCase.id}</code></div>
+            {"sourceTool" in testCase ? <>
+              <div className="inspector-block"><strong>Agent task</strong><div className="inspector-message"><span>user</span><p>{testCase.task}</p></div></div>
+              <div className="agent-contract-grid">
+                <div className="inspector-block compact"><strong>Authorized targets</strong><p>{testCase.authorizedScope.targets.join(", ")}</p><strong>Boundary</strong><p>{testCase.authorizedScope.boundary}</p></div>
+                <div className="inspector-block compact"><strong>Stop conditions</strong>{testCase.stopConditions.map((condition) => <p key={condition}>{condition}</p>)}<strong>Prohibited actions</strong>{testCase.prohibitedActions.map((action) => <p key={action}>{action}</p>)}</div>
+              </div>
+              <div className="inspector-block"><strong>Clean source observation</strong><pre>{testCase.sourceTool.clean.content.map((item) => item.text).join("\n")}</pre></div>
+              <div className="inspector-block"><strong>Poisoned source observation</strong><pre>{testCase.sourceTool.poisoned.content.map((item) => item.text).join("\n")}</pre></div>
+              <div className="inspector-block"><strong>Action-based evaluation</strong><p>Forbidden tools: {testCase.expectations.forbiddenToolCalls.join(", ") || "none"}</p><p>{testCase.expectations.humanReviewRubric}</p></div>
+            </> : "turns" in testCase ? <>
               {testCase.setup?.length ? <div className="inspector-block"><strong>Conversation setup</strong>{testCase.setup.map((message, index) => <div className="inspector-message" key={index}><span>{message.role}</span><p>{message.content}</p></div>)}</div> : null}
               <div className="inspector-turn-list">{testCase.turns.map((turn, turnIndex) => <section className="inspector-turn" key={turn.id}><div><span>Stage {turnIndex + 1}</span><strong>{turn.title}</strong></div><div className="inspector-message"><span>user</span><p>{turn.prompt}</p></div><div className="inspector-block compact"><strong>Stage criteria</strong>{turn.evaluators.map((evaluator, index) => <div className="inspector-rule" key={index}><span>{evaluator.type.replaceAll("_", " ")}</span><p>{formatEvaluatorCriteria(evaluator)}</p></div>)}</div></section>)}</div>
             </> : <>
               <div className="inspector-block"><strong>Messages sent to the model</strong>{testCase.messages.map((message, index) => <div className="inspector-message" key={index}><span>{message.role}</span><p>{message.content}</p></div>)}</div>
               <div className="inspector-block"><strong>Evaluation criteria</strong>{testCase.evaluators.map((evaluator, index) => <div className="inspector-rule" key={index}><span>{evaluator.type.replaceAll("_", " ")}</span><p>{formatEvaluatorCriteria(evaluator)}</p></div>)}</div>
             </>}
-            <div className="inspector-parameters"><span>Temperature <strong>{testCase.parameters?.temperature ?? "provider default"}</strong></span><span>Max tokens <strong>{testCase.parameters?.maxTokens ?? "provider default"}</strong></span><span>Seed <strong>{testCase.parameters?.seed ?? "not set"}</strong></span></div>
+            {!("sourceTool" in testCase) && <div className="inspector-parameters"><span>Temperature <strong>{testCase.parameters?.temperature ?? "provider default"}</strong></span><span>Max tokens <strong>{testCase.parameters?.maxTokens ?? "provider default"}</strong></span><span>Seed <strong>{testCase.parameters?.seed ?? "not set"}</strong></span></div>}
           </section>
         ))}
         <div className="modal-actions"><button className="button button-primary" onClick={onClose}>Done</button></div>
@@ -648,7 +658,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
               {suites.map((suite) => (
                 <button type="button" key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} aria-pressed={selectedSuiteIds.includes(suite.id)} onClick={() => toggleSuite(suite.id)}>
                   <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
-                  <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : ""} · v{suite.version}</small></span>
+                  <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : suite.schemaVersion === 3 ? " · paired agent tool-use v3" : ""} · v{suite.version}</small></span>
                   <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
                 </button>
               ))}
@@ -693,13 +703,16 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
           <div className="summary-line"><span>Suites</span><strong>{selectedSuites.length}</strong></div>
           <div className="summary-line"><span>Individual tests</span><strong>{selectedSuites.reduce((sum, suite) => sum + suite.cases.length, 0)}</strong></div>
           <div className="summary-line"><span>Model targets</span><strong>{targets.length}</strong></div>
-          <div className="summary-line total"><span>Total requests</span><strong>{targets.length ? totalRequests : 0}</strong></div>
+          <div className="summary-line total"><span>Evaluation units</span><strong>{targets.length ? totalRequests : 0}</strong></div>
           <div className="privacy-callout"><ShieldCheck size={18} /><div><strong>Evidence-first record</strong><span>Provider, model ID, parameters, suite versions, raw responses, and timing will be recorded locally.</span></div></div>
           <button className="button button-primary button-full" disabled={!selectedSuites.length || !targets.length || targets.some((target) => !target.model.trim())} onClick={start}>
             <Play size={16} fill="currentColor" /> Start evaluation
           </button>
           {targets.some((target) => connections.find((connection) => connection.id === target.connectionId)?.provider !== "ollama") && (
             <p className="remote-warning"><Cloud size={14} /> Selected prompts will be sent to remote API providers.</p>
+          )}
+          {selectedSuites.some((suite) => suite.schemaVersion === 3) && (
+            <p className="remote-warning"><Bot size={14} /> Agent v3 suites require a model that supports tool or function calling. Unsupported models will not complete the clean control.</p>
           )}
         </aside>
       </div>
@@ -713,11 +726,11 @@ function LiveRun({ run, progress, onCancel, onResults }: { run: EvaluationRun | 
   const done = run?.status === "completed" || run?.status === "cancelled";
   return (
     <>
-      <PageTitle eyebrow="Live evaluation" title={run?.name ?? "Preparing evaluation…"} description={done ? `Run ${run?.status}. Review the evidence and model responses.` : "Requests are processed in a stable order and saved as they complete."} />
+      <PageTitle eyebrow="Live evaluation" title={run?.name ?? "Preparing evaluation…"} description={done ? `Run ${run?.status}. Review the evidence and model responses.` : "Evaluation units are processed in a stable order and saved as they complete."} />
       <div className="live-layout">
         <section className="panel progress-panel">
           <div className="progress-header">
-            <div className={`live-status ${done ? "done" : ""}`}>{done ? <CheckCircle2 size={20} /> : <LoaderCircle className="spinning" size={20} />}<div><strong>{done ? "Evaluation complete" : "Evaluation in progress"}</strong><span>{progress.completed} of {progress.total} requests processed{!done && progress.current ? ` · ${progress.current}` : ""}</span></div></div>
+            <div className={`live-status ${done ? "done" : ""}`}>{done ? <CheckCircle2 size={20} /> : <LoaderCircle className="spinning" size={20} />}<div><strong>{done ? "Evaluation complete" : "Evaluation in progress"}</strong><span>{progress.completed} of {progress.total} evaluation units complete{!done && progress.current ? ` · ${progress.current}` : ""}</span></div></div>
             <strong className="progress-percent">{percent}%</strong>
           </div>
           <div className="progress-track"><span style={{ width: `${percent}%` }} /></div>
@@ -820,7 +833,7 @@ function Results({
                 const review = latestReview(result);
                 return <div className="result-record" key={result.id}>
                   <button className="result-record-row" onClick={() => setExpanded(expanded === result.id ? null : result.id)}>
-                    <span><i className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={12} /> : result.status === "review" ? <CircleHelp size={12} /> : <X size={12} />}</i><span><strong>{result.caseTitle}</strong><small>{result.suiteId} · v{result.suiteVersion}{result.executionType === "multi_turn" ? ` · ${result.turnResults?.length ?? 0}-stage multi-turn` : ""}</small></span></span>
+                    <span><i className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={12} /> : result.status === "review" ? <CircleHelp size={12} /> : <X size={12} />}</i><span><strong>{result.caseTitle}</strong><small>{result.suiteId} · v{result.suiteVersion}{result.executionType === "multi_turn" ? ` · ${result.turnResults?.length ?? 0}-stage multi-turn` : result.executionType === "agent_tool" ? " · paired agent tools" : ""}</small></span></span>
                     <span><strong>{result.target.model}</strong><small>{providerLabel(result.target.provider)}</small></span>
                     <span className="outcome-stack"><b className={`status-chip ${result.status}`}>{result.status}</b>{review && <small className={`review-verdict ${review.verdict}`}>{review.reviewerType === "human" ? "Human" : "Model"}: {reviewVerdictLabel(review.verdict)}</small>}</span>
                     <span>{result.latencyMs.toLocaleString()} ms</span>
@@ -828,7 +841,7 @@ function Results({
                   </button>
                   {expanded === result.id && (
                     <div className="result-detail">
-                      {result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
+                      {result.executionType === "agent_tool" && result.agentEvidence ? <AgentToolEvidence result={result} /> : result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
                         <ResultReviewContext result={result} />
                         <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
                         <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
@@ -871,6 +884,50 @@ function MultiTurnEvidence({ result }: { result: CaseResult }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function AgentToolEvidence({ result }: { result: CaseResult }) {
+  const evidence = result.agentEvidence!;
+  const renderVariant = (variant: typeof evidence.clean, label: string) => (
+    <article className={`agent-variant ${variant.variant}`}>
+      <div className="agent-variant-heading">
+        <div><span>{label}</span><strong>{variant.status}</strong></div>
+        <small>{variant.steps} model turn{variant.steps === 1 ? "" : "s"} · {variant.latencyMs.toLocaleString()} ms</small>
+      </div>
+      <div className="agent-trace-section"><h5>Tool trace</h5>
+        {variant.toolCalls.length ? variant.toolCalls.map((call) => {
+          const toolResult = variant.toolResults.find((item) => item.toolCallId === call.id);
+          return <div className="agent-tool-event" key={call.id}>
+            <div><span>call</span><strong>{call.name}</strong></div>
+            <pre>{JSON.stringify(call.arguments, null, 2)}</pre>
+            <div><span>result</span></div>
+            <pre>{toolResult ? JSON.stringify(toolResult.response, null, 2) : "No tool result was recorded."}</pre>
+          </div>;
+        }) : <p className="review-context-empty">The model made no tool calls.</p>}
+      </div>
+      <div className="agent-trace-section"><h5>Final model response</h5><pre>{variant.finalResponse || variant.error || "No final response was recorded."}</pre></div>
+    </article>
+  );
+  return (
+    <section className="agent-evidence" aria-label="Paired agent tool-use evidence">
+      <div className="review-context-heading">
+        <div><h4>Paired agent tool-use evaluation</h4><p>Clean utility and poisoned security are evaluated separately</p></div>
+        <span>{evidence.comparison.resilient ? "Resilient pair" : evidence.comparison.attackSucceeded ? "Attack succeeded" : "Pair incomplete"}</span>
+      </div>
+      <div className="agent-contract-grid">
+        <div><h5>Authorized scope</h5><p><strong>Targets:</strong> {evidence.authorizedScope.targets.join(", ")}</p><p><strong>Actions:</strong> {evidence.authorizedScope.actions.join(", ")}</p><p>{evidence.authorizedScope.boundary}</p></div>
+        <div><h5>Stop conditions</h5>{evidence.stopConditions.map((condition) => <p key={condition}>• {condition}</p>)}<h5>Prohibited actions</h5>{evidence.prohibitedActions.map((action) => <p key={action}>• {action}</p>)}</div>
+      </div>
+      <div className="agent-comparison">
+        <span className={evidence.comparison.cleanUtilityPass ? "pass" : "fail"}>Clean utility: {evidence.comparison.cleanUtilityPass ? "pass" : "fail"}</span>
+        <span className={evidence.comparison.cleanSecurityPass ? "pass" : "fail"}>Clean security: {evidence.comparison.cleanSecurityPass ? "pass" : "fail"}</span>
+        <span className={evidence.comparison.poisonedUtilityPass ? "pass" : "fail"}>Poisoned utility: {evidence.comparison.poisonedUtilityPass ? "pass" : "fail"}</span>
+        <span className={evidence.comparison.poisonedSecurityPass ? "pass" : "fail"}>Poisoned security: {evidence.comparison.poisonedSecurityPass ? "pass" : "fail"}</span>
+      </div>
+      <div className="agent-variant-grid">{renderVariant(evidence.clean, "Clean control")}{renderVariant(evidence.poisoned, "Poisoned variant")}</div>
+      <div className="multi-turn-outcomes"><h5>Evaluation criteria and evidence</h5>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
     </section>
   );
 }
@@ -1431,6 +1488,8 @@ function formatEvaluatorCriteria(evaluator: Evaluator): string {
   if (evaluator.type === "regex") return `Automatic pattern · /${evaluator.pattern}/${evaluator.flags ?? ""}`;
   if (evaluator.type === "non_empty") return `Automatic length check · at least ${evaluator.minimumCharacters ?? 1} characters`;
   if (evaluator.type === "valid_json") return "Automatic structure check · response must be valid JSON";
+  if (evaluator.type === "forbidden_tool_calls") return `Action trace check · must not call: ${evaluator.values.join(", ") || "none"}`;
+  if (evaluator.type === "forbidden_tool_arguments") return `Action trace check · protected values must not appear in tool arguments (${evaluator.values.length} monitored)`;
   return `Human review rubric · ${evaluator.rubric}`;
 }
 

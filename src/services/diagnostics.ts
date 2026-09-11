@@ -43,7 +43,7 @@ function write<T>(key: string, value: T): void {
 }
 
 function announceChange(): void {
-  window.dispatchEvent(new CustomEvent(changedEvent));
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(changedEvent));
 }
 
 export function redactDiagnosticUrl(input: string): string {
@@ -115,4 +115,3 @@ export function subscribeToDiagnostics(callback: () => void): () => void {
   window.addEventListener(changedEvent, callback);
   return () => window.removeEventListener(changedEvent, callback);
 }
-

@@ -1,5 +1,6 @@
 import type {
   CaseResult,
+  AgentEvidence,
   EvaluationOutcome,
   EvaluationRun,
   ProviderKind,
@@ -41,10 +42,11 @@ export type PublishedCaseResult = {
   status: CaseResult["status"];
   error?: string;
   reviews?: PublishedReview[];
-  executionType?: "single_turn" | "multi_turn";
+  executionType?: "single_turn" | "multi_turn" | "agent_tool";
   outcomePolicy?: "fail_on_any_turn";
   turnResults?: Array<Omit<TurnResult, "error"> & { error?: string }>;
   firstFailedTurn?: number;
+  agentEvidence?: AgentEvidence;
 };
 
 export type EvaluationSubmission = {
@@ -103,6 +105,7 @@ export function publicationIssues(run: EvaluationRun, suites: TestSuite[]): stri
     if (snapshot?.contentHash && result.suiteHash && snapshot.contentHash !== result.suiteHash) issues.push(`${result.caseTitle} does not match its suite snapshot hash.`);
     if (result.response.length > 200_000) issues.push(`${result.caseTitle} has a response that exceeds the public submission size limit.`);
     if (result.turnResults?.some((turn) => turn.prompt.length > 20_000 || turn.response.length > 200_000)) issues.push(`${result.caseTitle} has multi-turn evidence that exceeds the public submission size limit.`);
+    if (result.agentEvidence && JSON.stringify(result.agentEvidence).length > 500_000) issues.push(`${result.caseTitle} has agent trace evidence that exceeds the public submission size limit.`);
     if (result.outcomes.some((outcome) => outcome.explanation.length > 4_000)) issues.push(`${result.caseTitle} has evaluator evidence that exceeds the public submission size limit.`);
     if (result.reviews?.some((review) => review.reviewerType === "human" && (review.notes?.length ?? 0) > 10_000)) issues.push(`${result.caseTitle} has human review notes that exceed the public submission size limit.`);
     if (result.reviews?.some((review) => review.reviewerType === "model" && (review.rationale.length > 20_000 || review.rawResponse.length > 100_000))) issues.push(`${result.caseTitle} has model-assisted review evidence that exceeds the public submission size limit.`);
@@ -136,6 +139,17 @@ function publishReview(review: ResultReview): PublishedReview {
 }
 
 function publishResult(result: CaseResult): PublishedCaseResult {
+  const agentEvidence = result.agentEvidence ? {
+    ...result.agentEvidence,
+    clean: {
+      ...result.agentEvidence.clean,
+      ...(result.agentEvidence.clean.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {})
+    },
+    poisoned: {
+      ...result.agentEvidence.poisoned,
+      ...(result.agentEvidence.poisoned.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {})
+    }
+  } : undefined;
   return {
     id: result.id,
     suiteId: result.suiteId,
@@ -161,7 +175,8 @@ function publishResult(result: CaseResult): PublishedCaseResult {
       ...turn,
       ...(turn.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {})
     })) } : {}),
-    ...(result.firstFailedTurn ? { firstFailedTurn: result.firstFailedTurn } : {})
+    ...(result.firstFailedTurn ? { firstFailedTurn: result.firstFailedTurn } : {}),
+    ...(agentEvidence ? { agentEvidence } : {})
   };
 }
 

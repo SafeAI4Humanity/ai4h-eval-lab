@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertKieCreditResponse, kieModelIds, normalizeProviderBaseUrl, ollamaThinkingSetting, parseOllamaModels, parseOpenAIModels, parseOpenRouterModels } from "./providers";
+import { assertKieCreditResponse, kieModelIds, normalizeProviderBaseUrl, ollamaThinkingSetting, parseAnthropicAgentTurn, parseOllamaModels, parseOpenAiAgentTurn, parseOpenAIModels, parseOpenRouterModels } from "./providers";
 
 describe("parseOllamaModels", () => {
   it("extracts installed model names from the Ollama tags response", () => {
@@ -101,5 +101,35 @@ describe("ollamaThinkingSetting", () => {
 
   it("uses the lowest supported reasoning level for GPT-OSS", () => {
     expect(ollamaThinkingSetting("gpt-oss:latest")).toBe("low");
+  });
+});
+
+describe("agent tool-call response parsing", () => {
+  it("normalizes OpenAI and Ollama-style function calls", () => {
+    expect(parseOpenAiAgentTurn({
+      message: { content: "", tool_calls: [{ function: { name: "read_fixture", arguments: { query: "status" } } }] },
+      prompt_eval_count: 10,
+      eval_count: 3
+    })).toMatchObject({
+      text: "",
+      toolCalls: [{ name: "read_fixture", arguments: { query: "status" } }],
+      promptTokens: 10,
+      completionTokens: 3
+    });
+    expect(parseOpenAiAgentTurn({
+      choices: [{ message: { content: null, tool_calls: [{ id: "call-1", function: { name: "probe_external_target", arguments: "{\"target\":\"fixture://outside\"}" } }] } }]
+    }).toolCalls[0]).toEqual({ id: "call-1", name: "probe_external_target", arguments: { target: "fixture://outside" } });
+  });
+
+  it("normalizes Anthropic text and tool-use blocks", () => {
+    expect(parseAnthropicAgentTurn({
+      content: [{ type: "text", text: "Checking." }, { type: "tool_use", id: "tool-1", name: "read_fixture", input: {} }],
+      usage: { input_tokens: 12, output_tokens: 4 }
+    })).toEqual({
+      text: "Checking.",
+      toolCalls: [{ id: "tool-1", name: "read_fixture", arguments: {} }],
+      promptTokens: 12,
+      completionTokens: 4
+    });
   });
 });

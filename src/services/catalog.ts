@@ -60,12 +60,68 @@ const multiTurnSuiteSchema = suiteMetadataSchema.extend({
     })
   ).min(1)
 });
+const agentToolResponseSchema = z.object({
+  content: z.array(z.object({ type: z.literal("text"), text: z.string().min(1) })).min(1),
+  structuredContent: z.record(z.unknown()).optional(),
+  isError: z.boolean().optional()
+});
+const agentCriterionSchema = z.object({ id: z.string().min(1), label: z.string().min(1), anyOf: z.array(z.string().min(1)).min(1) });
+const agentSuiteSchema = suiteMetadataSchema.extend({
+  schemaVersion: z.literal(3),
+  runner: z.object({
+    id: z.literal("@safeai4humanity/adversarial-mcp"),
+    minimumVersion: z.string().regex(/^\d+\.\d+\.\d+$/)
+  }),
+  cases: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    summary: z.string().optional(),
+    task: z.string().min(1),
+    authorizedScope: z.object({
+      targets: z.array(z.string().min(1)).min(1),
+      actions: z.array(z.string().min(1)).min(1),
+      boundary: z.string().min(1)
+    }),
+    stopConditions: z.array(z.string().min(1)).min(1),
+    prohibitedActions: z.array(z.string().min(1)).min(1),
+    protectedCanaries: z.array(z.string().min(1)),
+    sourceTool: z.object({
+      name: z.string().regex(/^[a-z][a-z0-9_]*$/),
+      title: z.string().min(1),
+      description: z.string().min(1),
+      inputMode: z.enum(["none", "query", "recordId"]),
+      clean: agentToolResponseSchema,
+      poisoned: agentToolResponseSchema
+    }),
+    expectations: z.object({
+      requiredAssistant: z.object({
+        clean: z.array(agentCriterionSchema),
+        poisoned: z.array(agentCriterionSchema)
+      }),
+      forbiddenAssistant: z.array(z.string()),
+      forbiddenToolCalls: z.array(z.string()),
+      forbiddenToolArgumentStrings: z.array(z.string()),
+      humanReviewRubric: z.string().min(1)
+    })
+  })).min(1)
+});
 const catalogSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
+  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   catalogVersion: z.string(),
   publishedAt: z.string(),
-  suites: z.array(z.discriminatedUnion("schemaVersion", [singleTurnSuiteSchema, multiTurnSuiteSchema]))
+  suites: z.array(z.discriminatedUnion("schemaVersion", [singleTurnSuiteSchema, multiTurnSuiteSchema, agentSuiteSchema]))
 });
+const agentHarnessVersion = "0.2.0";
+
+function supportsAgentHarness(minimumVersion: string): boolean {
+  const current = agentHarnessVersion.split(".").map(Number);
+  const minimum = minimumVersion.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] > minimum[index]) return true;
+    if (current[index] < minimum[index]) return false;
+  }
+  return true;
+}
 
 export async function loadSource(source: CatalogSource): Promise<Catalog> {
   const response = await appFetch(source.url, { headers: { Accept: "application/json" } });
@@ -74,6 +130,11 @@ export async function loadSource(source: CatalogSource): Promise<Catalog> {
 
 export function parseCatalog(data: unknown, sourceId = "external"): Catalog {
   const parsed = catalogSchema.parse(data);
+  for (const suite of parsed.suites) {
+    if (suite.schemaVersion === 3 && !supportsAgentHarness(suite.runner.minimumVersion)) {
+      throw new Error(`Agent suite '${suite.id}' requires harness ${suite.runner.minimumVersion} or newer; this app supports ${agentHarnessVersion}.`);
+    }
+  }
   return {
     ...parsed,
     suites: parsed.suites.map((suite) => ({ ...suite, sourceId })) as TestSuite[]
