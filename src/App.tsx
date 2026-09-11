@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   Bot,
+  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
+  Tag,
   TestTube2,
   Trash2,
   UserCheck,
@@ -41,7 +43,7 @@ import {
   X,
   XCircle
 } from "lucide-react";
-import { bundledSuites, refreshCatalogs } from "./services/catalog";
+import { bundledCatalogInfo, bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
 import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
@@ -607,17 +609,53 @@ function SuiteInspector({ suite, onClose }: { suite: TestSuite; onClose: () => v
   );
 }
 
+type SuiteSort = "released-desc" | "released-asc" | "title-asc" | "category-asc" | "tests-desc" | "risk-desc";
+
 function NewEvaluation({ suites, connections, onStart, onConnections }: { suites: TestSuite[]; connections: Connection[]; onStart: (name: string, suites: TestSuite[], targets: RunTarget[]) => void; onConnections: () => void }) {
   const [selectedSuiteIds, setSelectedSuiteIds] = useState<string[]>(suites.slice(0, 1).map((suite) => suite.id));
   const [targets, setTargets] = useState<Array<{ connectionId: string; model: string }>>([]);
   const [name, setName] = useState(`Model safety evaluation · ${new Date().toLocaleDateString()}`);
+  const [suiteSearch, setSuiteSearch] = useState("");
+  const [suiteCategory, setSuiteCategory] = useState("all");
+  const [suiteRisk, setSuiteRisk] = useState("all");
+  const [suiteFormat, setSuiteFormat] = useState("all");
+  const [suiteSort, setSuiteSort] = useState<SuiteSort>("released-desc");
   const selectedSuites = suites.filter((suite) => selectedSuiteIds.includes(suite.id));
-  const allSuitesSelected = suites.length > 0 && suites.every((suite) => selectedSuiteIds.includes(suite.id));
-  const availableTestCount = suites.reduce((sum, suite) => sum + suite.cases.length, 0);
+  const categories = useMemo(() => [...new Set(suites.map((suite) => suite.category))].sort((a, b) => a.localeCompare(b)), [suites]);
+
+  const visibleSuites = useMemo(() => {
+    const query = suiteSearch.trim().toLowerCase();
+    const matched = suites.filter((suite) => {
+      if (suiteCategory !== "all" && suite.category !== suiteCategory) return false;
+      if (suiteRisk !== "all" && suite.risk !== suiteRisk) return false;
+      if (suiteFormat !== "all" && String(suite.schemaVersion) !== suiteFormat) return false;
+      if (!query) return true;
+      return `${suite.title} ${suite.summary} ${suite.category} ${suite.tags.join(" ")}`.toLowerCase().includes(query);
+    });
+    const riskOrder = { low: 0, moderate: 1, high: 2 };
+    return [...matched].sort((a, b) => {
+      if (suiteSort === "released-desc") return suiteReleaseTime(b) - suiteReleaseTime(a) || a.title.localeCompare(b.title);
+      if (suiteSort === "released-asc") return suiteReleaseTime(a) - suiteReleaseTime(b) || a.title.localeCompare(b.title);
+      if (suiteSort === "title-asc") return a.title.localeCompare(b.title);
+      if (suiteSort === "tests-desc") return b.cases.length - a.cases.length || a.title.localeCompare(b.title);
+      if (suiteSort === "risk-desc") return riskOrder[b.risk] - riskOrder[a.risk] || a.title.localeCompare(b.title);
+      return a.category.localeCompare(b.category) || a.title.localeCompare(b.title);
+    });
+  }, [suites, suiteSearch, suiteCategory, suiteRisk, suiteFormat, suiteSort]);
+
+  const filtersActive = suiteSearch.trim() !== "" || suiteCategory !== "all" || suiteRisk !== "all" || suiteFormat !== "all";
+  const allVisibleSelected = visibleSuites.length > 0 && visibleSuites.every((suite) => selectedSuiteIds.includes(suite.id));
+  const visibleTestCount = visibleSuites.reduce((sum, suite) => sum + suite.cases.length, 0);
+  const hiddenSelectedCount = selectedSuites.filter((suite) => !visibleSuites.some((item) => item.id === suite.id)).length;
   const totalRequests = selectedSuites.reduce((sum, suite) => sum + suiteRequestCount(suite), 0) * Math.max(targets.length, 1);
 
   const toggleSuite = (id: string) => setSelectedSuiteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  const toggleAllSuites = () => setSelectedSuiteIds(allSuitesSelected ? [] : [...new Set(suites.map((suite) => suite.id))]);
+  const toggleAllSuites = () => setSelectedSuiteIds((current) => {
+    const visibleIds = visibleSuites.map((suite) => suite.id);
+    if (allVisibleSelected) return current.filter((id) => !visibleIds.includes(id));
+    return [...new Set([...current, ...visibleIds])];
+  });
+  const resetSuiteFilters = () => { setSuiteSearch(""); setSuiteCategory("all"); setSuiteRisk("all"); setSuiteFormat("all"); };
   const addTarget = (connection: Connection) => {
     const defaultModel = connection.modelHint ?? connection.models?.[0] ?? "";
     setTargets((current) => [...current, { connectionId: connection.id, model: defaultModel }]);
@@ -647,22 +685,58 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
           </section>
           <section className="panel builder-section">
             <div className="step-heading"><span>2</span><div><h3>Select test suites</h3><p>Suite contents and version hashes are stored with the result.</p></div><strong>{selectedSuiteIds.length} selected</strong></div>
+            <div className="suite-filter-bar">
+              <label className="search-box small"><Search size={16} /><input value={suiteSearch} onChange={(event) => setSuiteSearch(event.target.value)} placeholder="Search suites, tags, or categories…" aria-label="Search test suites" /></label>
+              <select value={suiteCategory} onChange={(event) => setSuiteCategory(event.target.value)} aria-label="Filter by category">
+                <option value="all">All categories</option>
+                {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <select value={suiteRisk} onChange={(event) => setSuiteRisk(event.target.value)} aria-label="Filter by risk">
+                <option value="all">All risk levels</option>
+                <option value="low">Low risk</option>
+                <option value="moderate">Moderate risk</option>
+                <option value="high">High risk</option>
+              </select>
+              <select value={suiteFormat} onChange={(event) => setSuiteFormat(event.target.value)} aria-label="Filter by test format">
+                <option value="all">All formats</option>
+                <option value="1">Single-turn (v1)</option>
+                <option value="2">Multi-turn (v2)</option>
+                <option value="3">Agent tool-use (v3)</option>
+              </select>
+              <select value={suiteSort} onChange={(event) => setSuiteSort(event.target.value as SuiteSort)} aria-label="Sort test suites">
+                <option value="released-desc">Newest release first</option>
+                <option value="released-asc">Oldest release first</option>
+                <option value="title-asc">Title A–Z</option>
+                <option value="category-asc">Category A–Z</option>
+                <option value="tests-desc">Most tests first</option>
+                <option value="risk-desc">Highest risk first</option>
+              </select>
+              {filtersActive && <button type="button" className="text-button" onClick={resetSuiteFilters}>Reset filters</button>}
+            </div>
             <div className="suite-selection-toolbar">
-              <button type="button" className={`select-all-tests${allSuitesSelected ? " selected" : ""}`} aria-pressed={allSuitesSelected} onClick={toggleAllSuites}>
-                <span className="check-box">{allSuitesSelected && <Check size={14} />}</span>
-                <span><strong>{allSuitesSelected ? "All tests selected" : "Select all tests"}</strong><small>{availableTestCount} tests across {suites.length} suites</small></span>
+              <button type="button" className={`select-all-tests${allVisibleSelected ? " selected" : ""}`} aria-pressed={allVisibleSelected} onClick={toggleAllSuites} disabled={!visibleSuites.length}>
+                <span className="check-box">{allVisibleSelected && <Check size={14} />}</span>
+                <span><strong>{allVisibleSelected ? (filtersActive ? "All shown suites selected" : "All tests selected") : (filtersActive ? "Select all shown suites" : "Select all tests")}</strong><small>{visibleTestCount} {visibleTestCount === 1 ? "test" : "tests"} across {visibleSuites.length} {filtersActive ? `of ${suites.length} ` : ""}{visibleSuites.length === 1 && !filtersActive ? "suite" : "suites"}{hiddenSelectedCount ? ` · ${hiddenSelectedCount} selected outside this filter` : ""}</small></span>
               </button>
-              {selectedSuiteIds.length > 0 && !allSuitesSelected && <button type="button" className="text-button" onClick={() => setSelectedSuiteIds([])}>Clear selection</button>}
+              {selectedSuiteIds.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedSuiteIds([])}>Clear selection</button>}
             </div>
-            <div className="suite-picker">
-              {suites.map((suite) => (
-                <button type="button" key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} aria-pressed={selectedSuiteIds.includes(suite.id)} onClick={() => toggleSuite(suite.id)}>
-                  <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
-                  <span className="picker-main"><strong>{suite.title}</strong><small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : suite.schemaVersion === 3 ? " · paired agent tool-use v3" : ""} · v{suite.version}</small></span>
-                  <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
-                </button>
-              ))}
-            </div>
+            {visibleSuites.length ? (
+              <div className="suite-picker">
+                {visibleSuites.map((suite) => (
+                  <button type="button" key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} aria-pressed={selectedSuiteIds.includes(suite.id)} onClick={() => toggleSuite(suite.id)}>
+                    <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
+                    <span className="picker-main">
+                      <strong>{suite.title}</strong>
+                      <small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : suite.schemaVersion === 3 ? " · paired agent tool-use v3" : ""} · v{suite.version}</small>
+                      <small className="picker-release">Released {formatCatalogDate(suite.releasedAt)}</small>
+                    </span>
+                    <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="suite-picker-empty">No test suites match these filters. <button type="button" className="text-button" onClick={resetSuiteFilters}>Reset filters</button></p>
+            )}
           </section>
           <section className="panel builder-section">
             <div className="step-heading"><span>3</span><div><h3>Add model targets</h3><p>Compare multiple providers or models in one run.</p></div><strong>{targets.length} targets</strong></div>
@@ -1338,6 +1412,7 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const bundled = bundledCatalogInfo();
   const [diagnosticConfig, setDiagnosticConfigState] = useState<DiagnosticConfig>(getDiagnosticConfig);
   const [diagnosticCount, setDiagnosticCount] = useState(() => getDiagnosticEntries().length);
   useEffect(() => subscribeToDiagnostics(() => {
@@ -1371,11 +1446,31 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
           <section className="panel settings-section" id="catalog-settings">
             <div className="panel-heading"><div><h3>Test catalog sources</h3><p>AI4H checks enabled sources on launch. Third-party catalogs are visibly labeled.</p></div><button className="button button-secondary button-small" onClick={() => setAdding(true)}><Plus size={15} /> Add source</button></div>
             <div className="source-list">
-              <div className="source-row builtin"><div className="source-icon"><HardDrive size={17} /></div><div><strong>Bundled starter catalog</strong><span>Ships with the app · always available offline</span></div><span className="status-chip success">Trusted</span><span className="toggle on"><i /></span></div>
+              <div className="source-row builtin">
+                <div className="source-icon"><HardDrive size={17} /></div>
+                <div>
+                  <strong>Bundled starter catalog</strong>
+                  <span>Ships with the app · always available offline</span>
+                  <div className="source-stats"><span><TestTube2 size={13} /> {bundled.suiteCount} suites</span><span><Tag size={13} /> catalog v{bundled.catalogVersion}</span><span><CalendarClock size={13} /> published {formatCatalogDate(bundled.publishedAt)}</span></div>
+                </div>
+                <span className="status-chip success">Trusted</span>
+                <span className="toggle on"><i /></span>
+              </div>
               {sources.map((source) => (
                 <div className="source-row" key={source.id}>
                   <div className="source-icon"><Github size={17} /></div>
-                  <div><strong>{source.name} {source.official && <ShieldCheck size={14} />}</strong><span>{source.url}</span>{source.error && <small>{source.error}</small>}</div>
+                  <div>
+                    <strong>{source.name} {source.official && <ShieldCheck size={14} />}</strong>
+                    <span>{source.url}</span>
+                    <div className="source-stats">
+                      {source.catalogVersion ? <>
+                        <span><TestTube2 size={13} /> {source.suiteCount ?? 0} suites</span>
+                        <span><Tag size={13} /> catalog v{source.catalogVersion}</span>
+                        <span><CalendarClock size={13} /> published {formatCatalogDate(source.catalogPublishedAt)}</span>
+                      </> : <span className="muted">{source.enabled ? "Not loaded yet — check sources to read version and suite count" : "Disabled — enable and check sources to read catalog details"}</span>}
+                    </div>
+                    {source.error && <small>{source.error}</small>}
+                  </div>
                   <span className={`status-chip ${source.status === "error" ? "fail" : source.official ? "success" : "review"}`}>{source.status === "error" ? "Unavailable" : source.official ? "Official" : "Third party"}</span>
                   <button className={`toggle ${source.enabled ? "on" : ""}`} onClick={() => onChange(sources.map((item) => item.id === source.id ? { ...item, enabled: !item.enabled } : item))}><i /></button>
                   {!source.official && <button className="icon-button small danger" onClick={() => onChange(sources.filter((item) => item.id !== source.id))}><Trash2 size={15} /></button>}
@@ -1484,6 +1579,17 @@ function formatDate(value: string): string {
 function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function formatCatalogDate(value?: string): string {
+  if (!value) return "unknown";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function suiteReleaseTime(suite: TestSuite): number {
+  const parsed = suite.releasedAt ? new Date(suite.releasedAt).getTime() : Number.NaN;
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 function formatEvaluatorCriteria(evaluator: Evaluator): string {

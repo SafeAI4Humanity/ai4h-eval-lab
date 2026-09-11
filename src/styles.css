@@ -216,7 +216,7 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .inspector-block.compact { gap: 5px; }
 
 .builder-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; gap: 20px; }
-.builder-main { display: flex; flex-direction: column; gap: 16px; }
+.builder-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .builder-section { padding: 21px; }
 .step-heading { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 17px; }
 .step-heading > span { width: 25px; height: 25px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; color: white; background: var(--teal-700); font-size: calc(10px * var(--font-scale)); font-weight: 800; }
@@ -239,15 +239,29 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .select-all-tests:hover strong { color: var(--teal-700); }
 .select-all-tests:focus-visible { outline: 3px solid #d8efea; outline-offset: 4px; border-radius: 4px; }
 .select-all-tests.selected .check-box { border-color: var(--teal-700); background: var(--teal-700); }
-.suite-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.suite-picker > button { min-height: 61px; display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #dfe7e4; border-radius: 9px; color: inherit; background: white; text-align: left; cursor: pointer; }
+.suite-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.suite-picker > button { min-width: 0; min-height: 61px; display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #dfe7e4; border-radius: 9px; color: inherit; background: white; text-align: left; cursor: pointer; }
 .suite-picker > button:hover { border-color: #a8c9c2; }
 .suite-picker > button.selected { border-color: #56aa9d; background: #f2fbf9; box-shadow: inset 0 0 0 1px #56aa9d; }
 .check-box { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #cbd8d5; border-radius: 5px; color: white; }
 .selected .check-box { border-color: var(--teal-700); background: var(--teal-700); }
 .picker-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .picker-main strong { overflow: hidden; font-size: calc(10px * var(--font-scale)); text-overflow: ellipsis; white-space: nowrap; }
-.picker-main small { color: #82918e; font-size: calc(8px * var(--font-scale)); }
+.picker-main small { overflow: hidden; color: #82918e; font-size: calc(8px * var(--font-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.picker-release { color: #9aa8a5; }
+
+.suite-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.suite-filter-bar .search-box { min-width: 190px; flex: 1 1 190px; border: 1px solid #d8e2df; border-radius: 8px; background: white; }
+.suite-filter-bar select { height: 33px; flex: 0 1 auto; min-width: 0; padding: 0 9px; border: 1px solid #d8e2df; border-radius: 8px; outline: none; color: #29403a; background: white; font-size: calc(9px * var(--font-scale)); cursor: pointer; }
+.suite-filter-bar select:focus { border-color: #63b7aa; box-shadow: 0 0 0 3px #e8f5f2; }
+.suite-filter-bar .search-box input { height: 31px; }
+.select-all-tests:disabled { cursor: not-allowed; opacity: .55; }
+.suite-picker-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 20px 12px; border: 1px dashed #cfdcd8; border-radius: 9px; color: #82918e; background: #fafcfb; font-size: calc(10px * var(--font-scale)); }
+
+.source-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.source-row .source-stats > span { display: inline-flex; align-items: center; gap: 4px; overflow: visible; color: #5d716c; font-size: calc(8px * var(--font-scale)); font-weight: 600; white-space: nowrap; }
+.source-row .source-stats > span.muted { color: #9aa8a5; font-weight: 500; white-space: normal; }
+.source-stats svg { flex: 0 0 auto; color: #93a3a0; }
 .target-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 13px; }
 .target-row { min-height: 60px; display: grid; grid-template-columns: auto minmax(110px,.7fr) minmax(150px,1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #dfe7e4; border-radius: 9px; background: #fafcfb; }
 .provider-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--teal-700); background: #e6f5f2; }
@@ -255,10 +269,11 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .target-row strong { overflow: hidden; font-size: calc(10px * var(--font-scale)); text-overflow: ellipsis; white-space: nowrap; }
 .target-row span { color: #82918e; font-size: calc(8px * var(--font-scale)); }
 .target-row input, .target-row select { height: 35px; }
-.connection-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-.connection-picker > button { min-height: 53px; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px dashed #bfcfcb; border-radius: 8px; color: #647772; background: white; text-align: left; cursor: pointer; }
+.connection-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.connection-picker > button { min-width: 0; min-height: 53px; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px dashed #bfcfcb; border-radius: 8px; color: #647772; background: white; text-align: left; cursor: pointer; }
 .connection-picker > button:hover { color: var(--teal-700); border-color: var(--teal-600); background: var(--teal-50); }
-.connection-picker span { display: flex; flex-direction: column; gap: 3px; }
+.connection-picker span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.connection-picker strong, .connection-picker small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-picker strong { font-size: calc(9px * var(--font-scale)); }
 .connection-picker small { color: #8a9996; font-size: calc(8px * var(--font-scale)); }
 .run-summary { position: sticky; top: 83px; padding: 20px; }
