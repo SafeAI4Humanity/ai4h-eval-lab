@@ -14,6 +14,8 @@ export type PublicationMetadata = {
   notes?: string;
 };
 
+export type SubmissionSchemaVersion = 1 | 2 | 3;
+
 export type PublishedTarget = {
   provider: ProviderKind;
   model: string;
@@ -50,7 +52,7 @@ export type PublishedCaseResult = {
 };
 
 export type EvaluationSubmission = {
-  schemaVersion: 2;
+  schemaVersion: SubmissionSchemaVersion;
   submissionId: string;
   submittedAt: string;
   organization: "Safe AI for Humanity Foundation";
@@ -138,7 +140,7 @@ function publishReview(review: ResultReview): PublishedReview {
   };
 }
 
-function publishResult(result: CaseResult): PublishedCaseResult {
+function publishResult(result: CaseResult, schemaVersion: SubmissionSchemaVersion): PublishedCaseResult {
   const agentEvidence = result.agentEvidence ? {
     ...result.agentEvidence,
     clean: {
@@ -169,15 +171,21 @@ function publishResult(result: CaseResult): PublishedCaseResult {
     status: result.status,
     ...(result.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {}),
     ...(result.reviews?.length ? { reviews: result.reviews.map(publishReview) } : {}),
-    ...(result.executionType ? { executionType: result.executionType } : {}),
-    ...(result.outcomePolicy ? { outcomePolicy: result.outcomePolicy } : {}),
-    ...(result.turnResults?.length ? { turnResults: result.turnResults.map((turn) => ({
+    ...(schemaVersion >= 2 && result.executionType ? { executionType: result.executionType } : {}),
+    ...(schemaVersion >= 2 && result.outcomePolicy ? { outcomePolicy: result.outcomePolicy } : {}),
+    ...(schemaVersion >= 2 && result.turnResults?.length ? { turnResults: result.turnResults.map((turn) => ({
       ...turn,
       ...(turn.error ? { error: "Request failed; local diagnostic details were excluded from this public bundle." } : {})
     })) } : {}),
-    ...(result.firstFailedTurn ? { firstFailedTurn: result.firstFailedTurn } : {}),
-    ...(agentEvidence ? { agentEvidence } : {})
+    ...(schemaVersion >= 2 && result.firstFailedTurn ? { firstFailedTurn: result.firstFailedTurn } : {}),
+    ...(schemaVersion === 3 && agentEvidence ? { agentEvidence } : {})
   };
+}
+
+export function submissionSchemaVersion(run: EvaluationRun): SubmissionSchemaVersion {
+  if (run.results.some((result) => result.executionType === "agent_tool" || Boolean(result.agentEvidence))) return 3;
+  if (run.results.some((result) => result.executionType === "multi_turn" || Boolean(result.turnResults?.length))) return 2;
+  return 1;
 }
 
 export function buildEvaluationSubmission(
@@ -189,6 +197,7 @@ export function buildEvaluationSubmission(
 ): EvaluationSubmission {
   const issues = publicationIssues(run, suites);
   if (issues.length) throw new Error(issues.join(" "));
+  const schemaVersion = submissionSchemaVersion(run);
 
   const suiteSnapshots = run.suiteSnapshots.map((snapshot) => {
     const suite = matchingSuite(snapshot, suites);
@@ -203,7 +212,7 @@ export function buildEvaluationSubmission(
   });
 
   return {
-    schemaVersion: 2,
+    schemaVersion,
     submissionId: options.submissionId ?? crypto.randomUUID(),
     submittedAt: options.submittedAt ?? new Date().toISOString(),
     organization: "Safe AI for Humanity Foundation",
@@ -221,7 +230,7 @@ export function buildEvaluationSubmission(
       status: "completed",
       suiteSnapshots,
       targets: run.targets.map((target) => ({ provider: target.provider, model: target.model })),
-      results: run.results.map(publishResult)
+      results: run.results.map((result) => publishResult(result, schemaVersion))
     }
   };
 }

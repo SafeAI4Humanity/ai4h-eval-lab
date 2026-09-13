@@ -4,7 +4,7 @@ AI4H Eval Lab keeps results local by default. Public submission is explicit, pre
 
 ## Phase 1: GitHub-reviewed submissions
 
-The **Prepare publication** action creates a schema-versioned bundle for the public `ai4h-evaluation-results` repository. It requires separate confirmation for public release and for inspection of raw responses and review notes.
+The **Prepare publication** action creates a schema-versioned bundle for the public `ai4h-evaluation-results` repository. It requires separate confirmation for public release and for inspection of raw responses and review notes. The app selects submission schema v1 for single-turn runs, v2 for runs containing fixed multi-turn tests, and v3 for runs containing agent tool-use tests.
 
 The bundle includes:
 
@@ -41,12 +41,12 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "submissionId": "uuid",
   "submittedAt": "ISO-8601 timestamp",
   "app": {
     "name": "AI4H Eval Lab",
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "consent": {
     "publicRelease": true,
@@ -60,6 +60,8 @@ This can be implemented with API Gateway + Lambda + S3 + SQS on AWS, or API Gate
   "run": {}
 }
 ```
+
+The example shows the newest envelope version. A prepared bundle may use schema version 1, 2, or 3 according to its result types; mixed runs use the newest version required by any included result.
 
 Suite snapshots also contain the category and risk label needed to reproduce dimension-level website cards without depending on a mutable catalog lookup.
 
