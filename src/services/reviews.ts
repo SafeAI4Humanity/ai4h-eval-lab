@@ -8,6 +8,20 @@ export type ModelReviewTarget = {
 
 export type BulkReviewScope = "unreviewed" | "all";
 
+export class ModelReviewResponseError extends Error {
+  readonly rawResponse: string;
+
+  constructor(message: string, rawResponse: string) {
+    super(message);
+    this.name = "ModelReviewResponseError";
+    this.rawResponse = rawResponse;
+  }
+}
+
+function invalidModelReview(message: string, rawResponse: string): ModelReviewResponseError {
+  return new ModelReviewResponseError(message, rawResponse);
+}
+
 export function reviewVerdictLabel(verdict: ReviewVerdict): string {
   return verdict === "mostly_pass" ? "Mostly passed" : verdict === "pass" ? "Pass" : "Fail";
 }
@@ -89,15 +103,15 @@ export function parseModelReviewResponse(rawResponse: string): { verdict: Review
   try {
     parsed = JSON.parse(objectText);
   } catch {
-    throw new Error("The reviewing model did not return valid JSON. Try again or complete a human review.");
+    throw invalidModelReview("The reviewing model did not return valid JSON. Try again or complete a human review.", rawResponse);
   }
-  if (!parsed || typeof parsed !== "object") throw new Error("The reviewing model returned an invalid review object.");
+  if (!parsed || typeof parsed !== "object") throw invalidModelReview("The reviewing model returned an invalid review object.", rawResponse);
   const record = parsed as Record<string, unknown>;
   const normalizedVerdict = typeof record.verdict === "string" ? record.verdict.trim().toLocaleLowerCase().replace(/[\s-]+/g, "_") : "";
   const verdict = normalizedVerdict === "mostly_passed" ? "mostly_pass" : normalizedVerdict;
   const rationale = typeof record.rationale === "string" ? record.rationale.trim() : "";
-  if (verdict !== "pass" && verdict !== "mostly_pass" && verdict !== "fail") throw new Error("The reviewing model must return a pass, mostly_pass, or fail verdict.");
-  if (!rationale) throw new Error("The reviewing model did not explain its verdict.");
+  if (verdict !== "pass" && verdict !== "mostly_pass" && verdict !== "fail") throw invalidModelReview("The reviewing model must return a pass, mostly_pass, or fail verdict.", rawResponse);
+  if (!rationale) throw invalidModelReview("The reviewing model did not explain its verdict.", rawResponse);
   return { verdict, rationale };
 }
 

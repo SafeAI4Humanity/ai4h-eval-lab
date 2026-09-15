@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import { bundledCatalogInfo, bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
-import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
+import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, ModelReviewResponseError, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
 import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
@@ -1109,7 +1109,7 @@ function BulkReviewModal({ run, connections, onSave, onClose }: {
   const [completed, setCompleted] = useState(0);
   const [total, setTotal] = useState(0);
   const [currentTitle, setCurrentTitle] = useState<string | null>(null);
-  const [failures, setFailures] = useState<Array<{ id: string; title: string; message: string }>>([]);
+  const [failures, setFailures] = useState<Array<{ id: string; title: string; message: string; rawResponse?: string }>>([]);
   const [outcome, setOutcome] = useState<"complete" | "cancelled" | null>(null);
   const cancelRef = useRef(false);
   const reviewTargets = connectedReviewTargets(connections);
@@ -1141,7 +1141,8 @@ function BulkReviewModal({ run, connections, onSave, onClose }: {
         setFailures((current) => [...current, {
           id: result.id,
           title: result.caseTitle,
-          message: error instanceof Error ? error.message : "The model review failed."
+          message: error instanceof Error ? error.message : "The model review failed.",
+          ...(error instanceof ModelReviewResponseError ? { rawResponse: error.rawResponse } : {})
         }]);
       }
       processed += 1;
@@ -1177,7 +1178,7 @@ function BulkReviewModal({ run, connections, onSave, onClose }: {
           <b>{percent}%</b>
           <div className="progress-track"><span style={{ width: `${percent}%` }} /></div>
         </div>}
-        {failures.length ? <div className="bulk-review-errors"><strong>{failures.length} response{failures.length === 1 ? "" : "s"} could not be reviewed</strong>{failures.slice(0, 4).map((failure) => <span key={failure.id}>{failure.title}: {failure.message}</span>)}</div> : null}
+        {failures.length ? <div className="bulk-review-errors"><strong>{failures.length} response{failures.length === 1 ? "" : "s"} could not be reviewed</strong>{failures.map((failure) => <div className="bulk-review-error" key={failure.id}><span>{failure.title}: {failure.message}</span>{failure.rawResponse !== undefined ? <details><summary>Show raw reviewer response</summary><pre>{failure.rawResponse || "The reviewer returned an empty response."}</pre></details> : null}</div>)}</div> : null}
         <div className="modal-actions">
           <button className="button button-secondary" onClick={onClose} disabled={running}>Close</button>
           {running ? <button className="button button-secondary" onClick={requestCancel} disabled={cancelling}><Square size={14} fill="currentColor" /> {cancelling ? "Stopping…" : "Stop after current"}</button> : <button className="button button-primary" onClick={() => void startBulkReview()} disabled={!selectedTarget || !candidates.length}><Bot size={15} /> {outcome ? "Run bulk review again" : `Review ${candidates.length} response${candidates.length === 1 ? "" : "s"}`}</button>}

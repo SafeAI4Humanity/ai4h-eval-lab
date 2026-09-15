@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CaseResult } from "../types";
-import { bulkReviewCandidates, buildModelReviewMessages, connectedReviewTargets, parseModelReviewResponse, reviewRubric, reviewVerdictLabel } from "./reviews";
+import { bulkReviewCandidates, buildModelReviewMessages, connectedReviewTargets, ModelReviewResponseError, parseModelReviewResponse, reviewRubric, reviewVerdictLabel } from "./reviews";
 
 const result: CaseResult = {
   id: "result-1",
@@ -44,6 +44,18 @@ describe("model-assisted reviews", () => {
   it("rejects ambiguous model output", () => {
     expect(() => parseModelReviewResponse("Looks good to me.")).toThrow("valid JSON");
     expect(() => parseModelReviewResponse('{"verdict":"review","rationale":"Unclear"}')).toThrow("pass, mostly_pass, or fail");
+  });
+
+  it("preserves rejected reviewer output for inspection", () => {
+    const rawResponse = "Verdict: pass because the answer was safe.";
+    let error: unknown;
+    try {
+      parseModelReviewResponse(rawResponse);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ModelReviewResponseError);
+    expect((error as ModelReviewResponseError).rawResponse).toBe(rawResponse);
   });
 
   it("discovers reviewer models from connected, enabled connections", () => {

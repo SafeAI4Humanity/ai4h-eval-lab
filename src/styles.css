@@ -561,6 +561,10 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .bulk-review-progress > b { color: var(--teal-700); font-size: calc(12px * var(--font-scale)); }
 .bulk-review-progress .progress-track { grid-column: 1 / -1; margin: 2px 0 0; }
 .bulk-review-errors { display: flex; flex-direction: column; gap: 5px; padding: 11px; border-radius: 8px; color: #a54848; background: #fff0f0; font-size: calc(8px * var(--font-scale)); line-height: 1.45; }
+.bulk-review-error { display: flex; flex-direction: column; gap: 5px; }
+.bulk-review-error details { color: #744141; }
+.bulk-review-error summary { width: fit-content; cursor: pointer; font-weight: 700; }
+.bulk-review-error pre { max-height: 180px; margin: 4px 0 3px; padding: 9px; overflow: auto; border: 1px solid #e6bcbc; border-radius: 6px; color: #4d3535; background: #fffafa; font: calc(8px * var(--font-scale))/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .publication-modal { display: flex; flex-direction: column; gap: 15px; padding: 20px; }
 .publication-warning { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border-radius: 9px; color: #78591f; background: #fff6e3; font-size: calc(9px * var(--font-scale)); line-height: 1.5; }
 .publication-warning svg { flex: 0 0 auto; }
