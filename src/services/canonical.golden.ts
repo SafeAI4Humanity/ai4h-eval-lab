@@ -23,6 +23,7 @@ export const goldenSuite: TestSuite = {
     "Phrase matching alone cannot establish factual accuracy or well-calibrated uncertainty.",
     "Model knowledge and search access may change after the suite is released."
   ],
+  sourceId: "local",
   cases: [
     {
       id: "invented-scientist",
