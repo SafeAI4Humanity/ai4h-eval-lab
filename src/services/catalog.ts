@@ -23,7 +23,10 @@ const suiteMetadataSchema = z.object({
   risk: z.enum(["low", "moderate", "high"]),
   license: z.string(),
   author: z.string(),
-  tags: z.array(z.string()),
+  tags: z
+    .array(z.string().regex(/^[a-z0-9-]+$/))
+    .min(1)
+    .refine((tags) => new Set(tags).size === tags.length, { message: "tags must be unique" }),
   limitations: z.array(z.string()).optional(),
   sourceId: z.string().optional().default("external"),
   releasedAt: z.string().optional(),
@@ -113,7 +116,19 @@ const catalogSchema = z.object({
   publishedAt: z.string(),
   suites: z.array(z.discriminatedUnion("schemaVersion", [singleTurnSuiteSchema, multiTurnSuiteSchema, agentSuiteSchema]))
 });
-const agentHarnessVersion = "0.2.0";
+export const agentHarnessVersion = "0.2.0";
+
+// Exported so the authoring surface (src/services/localSuites.ts) validates
+// against the SAME schemas the catalog loader uses — one source of truth.
+export {
+  messageSchema,
+  evaluatorSchema,
+  parametersSchema,
+  suiteMetadataSchema,
+  singleTurnSuiteSchema,
+  multiTurnSuiteSchema,
+  agentSuiteSchema
+};
 
 function supportsAgentHarness(minimumVersion: string): boolean {
   const current = agentHarnessVersion.split(".").map(Number);

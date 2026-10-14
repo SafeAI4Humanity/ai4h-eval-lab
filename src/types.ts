@@ -279,3 +279,21 @@ export type ProviderResponse = {
   promptTokens?: number;
   completionTokens?: number;
 };
+
+/**
+ * A locally-authored suite: the canonical `TestSuite` plus the authoring
+ * wrapper that tracks its serialized form and fingerprint.
+ *
+ * `dirty` is the key invariant: any edit to `suite` sets `dirty = true`;
+ * `canonicalize` (re-serialize + re-hash) clears it. The editor never presents
+ * a runnable/exportable suite while `dirty` is true. See docs/SUITE_AUTHORING.md §4.1.
+ */
+export type LocalSuite = {
+  suite: TestSuite;
+  yaml: string;
+  /** sha256:<64-hex> fingerprint of `yaml`. Absent while the suite is dirty. */
+  contentHash?: string;
+  createdAt: string;
+  updatedAt: string;
+  dirty: boolean;
+};
