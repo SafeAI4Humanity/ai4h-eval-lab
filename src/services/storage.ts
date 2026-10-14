@@ -1,4 +1,4 @@
-import type { CatalogSource, Connection, EvaluationRun } from "../types";
+import type { CatalogSource, Connection, EvaluationRun, LocalSuite } from "../types";
 
 export type InterfaceScale = "default" | "comfortable" | "large" | "extra-large";
 
@@ -6,6 +6,7 @@ const keys = {
   connections: "ai4h.connections.v1",
   sources: "ai4h.sources.v1",
   runs: "ai4h.runs.v1",
+  localSuites: "ai4h.local-suites.v1",
   interfaceScale: "ai4h.interface-scale.v1"
 };
 
@@ -72,6 +73,8 @@ export const storage = {
   setSources: (value: CatalogSource[]) => write(keys.sources, value),
   getRuns: () => read<EvaluationRun[]>(keys.runs, []),
   setRuns: (value: EvaluationRun[]) => write(keys.runs, value.slice(0, 100)),
+  getLocalSuites: () => read<LocalSuite[]>(keys.localSuites, []),
+  setLocalSuites: (value: LocalSuite[]) => write(keys.localSuites, value),
   getInterfaceScale: (): InterfaceScale => {
     const value = read<InterfaceScale>(keys.interfaceScale, "default");
     return interfaceScales.includes(value) ? value : "default";

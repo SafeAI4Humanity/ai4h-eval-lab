@@ -76,6 +76,7 @@ authoring wrapper:
 
 ```ts
 type LocalSuite = {
+  localId: string;         // stable editor identity; independent of the editable suite id
   suite: TestSuite;        // the canonical, schema-valid suite object
   yaml: string;            // the canonical YAML serialization (source of truth for hashing)
   contentHash: string;     // sha256:<64-hex> over `yaml` bytes
@@ -250,7 +251,13 @@ introduce.
 - Suite-level: identity/uniqueness + v3 marker lint shown as a "Checks" panel
   with pass/fail per rule and a one-line fix hint.
 - A suite is **runnable** when the structural schema passes. It is
-  **publishable** only when structural + identity + marker lint all pass.
+  **publishable** only when structural + publication schema + identity + marker lint all pass.
+- M2 validates exported v1 objects with Ajv against `src/data/suite.schema.json`,
+  pinned from `ai4h-test-suites` commit `e0fffafc96d42c0026a1fdfacb5f76868b2292d4`.
+  Update that snapshot deliberately when the official schema changes. The exit
+  test uses the same checked-in schema and requires no sibling checkout.
+- Existing drafts receive a stable `localId` on load; it persists on the next
+  edit. Only saved, structurally valid drafts enter the library and run picker.
 
 ## 7. Editor UI
 

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-4-h.org/schemas/eval-suite-v1.json",
+  "title": "AI4H Evaluation Suite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "version", "title", "summary", "category", "risk", "license", "author", "tags", "cases"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "title": { "type": "string", "minLength": 4, "maxLength": 100 },
+    "summary": { "type": "string", "minLength": 20, "maxLength": 300 },
+    "category": { "type": "string", "minLength": 3, "maxLength": 80 },
+    "risk": { "enum": ["low", "moderate", "high"] },
+    "license": { "type": "string", "minLength": 3 },
+    "author": { "type": "string", "minLength": 2 },
+    "tags": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9-]+$" } },
+    "releasedAt": { "type": "string", "format": "date-time" },
+    "limitations": { "type": "array", "items": { "type": "string", "minLength": 8 } },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/testCase" }
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "content"],
+      "properties": {
+        "role": { "enum": ["system", "user", "assistant"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 20000 }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+        "maxTokens": { "type": "integer", "minimum": 1, "maximum": 32768 },
+        "seed": { "type": "integer" }
+      }
+    },
+    "evaluator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "values"],
+          "properties": {
+            "type": { "const": "contains_any" },
+            "values": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "caseSensitive": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "values"],
+          "properties": {
+            "type": { "const": "contains_none" },
+            "values": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "caseSensitive": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "pattern"],
+          "properties": { "type": { "const": "regex" }, "pattern": { "type": "string" }, "flags": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "non_empty" }, "minimumCharacters": { "type": "integer", "minimum": 1 } }
+        },
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "valid_json" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "rubric"],
+          "properties": { "type": { "const": "human_review" }, "rubric": { "type": "string", "minLength": 10, "maxLength": 1000 } }
+        }
+      ]
+    },
+    "testCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "messages", "evaluators"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "messages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/message" } },
+        "parameters": { "$ref": "#/$defs/parameters" },
+        "evaluators": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evaluator" } }
+      }
+    }
+  }
+}

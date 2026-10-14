@@ -24,6 +24,7 @@ import {
   LoaderCircle,
   Menu,
   MoreHorizontal,
+  PenLine,
   Play,
   Plus,
   RefreshCw,
@@ -49,6 +50,16 @@ import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, late
 import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
 import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
 import { deleteSecret, setSecret, storage, type InterfaceScale } from "./services/storage";
+import { canonicalYaml } from "./services/canonical";
+import {
+  canonicalize,
+  getLocalSuites,
+  newLocalSuite,
+  availableLocalSuites,
+  setLocalSuites,
+  validateSuite,
+  withSuite
+} from "./services/localSuites";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
 import {
   clearDiagnosticEntries,
@@ -59,6 +70,7 @@ import {
   type DiagnosticConfig
 } from "./services/diagnostics";
 import type {
+  ChatMessage,
   CatalogSource,
   CaseResult,
   Connection,
@@ -68,14 +80,17 @@ import type {
   ResultReview,
   ReviewVerdict,
   RunTarget,
-  TestSuite
+  SingleTurnTestCase,
+  TestSuite,
+  LocalSuite
 } from "./types";
 
-type Page = "dashboard" | "library" | "new-run" | "live-run" | "results" | "connections" | "settings";
+type Page = "dashboard" | "library" | "authoring" | "new-run" | "live-run" | "results" | "connections" | "settings";
 
 const navItems: Array<{ page: Page; label: string; icon: typeof Activity }> = [
   { page: "dashboard", label: "Overview", icon: Activity },
   { page: "library", label: "Test library", icon: Library },
+  { page: "authoring", label: "Authoring", icon: PenLine },
   { page: "new-run", label: "New evaluation", icon: Play },
   { page: "results", label: "Results", icon: BarChart3 },
   { page: "connections", label: "Connections", icon: Server }
@@ -143,6 +158,7 @@ function App() {
   const [connections, setConnections] = useState<Connection[]>(storage.getConnections);
   const [sources, setSources] = useState<CatalogSource[]>(storage.getSources);
   const [suites, setSuites] = useState<TestSuite[]>(bundledSuites);
+  const [localSuites, setLocalSuitesState] = useState<LocalSuite[]>(getLocalSuites);
   const [runs, setRuns] = useState<EvaluationRun[]>(storage.getRuns);
   const [catalogChecking, setCatalogChecking] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState("Bundled catalog ready");
@@ -172,6 +188,24 @@ function App() {
     setRuns(next);
     storage.setRuns(next);
   };
+
+  const persistLocalSuites: React.Dispatch<React.SetStateAction<LocalSuite[]>> = (change) => {
+    setLocalSuitesState((current) => {
+      const next = typeof change === "function" ? change(current) : change;
+      setLocalSuites(next);
+      return next;
+    });
+  };
+  const [initialSuiteKey, setInitialSuiteKey] = useState<string | undefined>();
+
+  // Local suites are first-class in the library and run flow (docs/SUITE_AUTHORING.md
+  // §4.2): they join the same TestSuite[] the runner consumes, kept separate from
+  // remote suites by sourceId. They live in their own state so a catalog refresh
+  // never wipes them.
+  const allSuites = useMemo<TestSuite[]>(
+    () => [...availableLocalSuites(localSuites), ...suites],
+    [localSuites, suites]
+  );
 
   const persistInterfaceScale = (next: InterfaceScale) => {
     setInterfaceScale(next);
@@ -243,6 +277,7 @@ function App() {
 
   const navigate = (next: Page) => {
     setPage(next);
+    setInitialSuiteKey(undefined);
     setMobileNav(false);
   };
 
@@ -337,8 +372,15 @@ function App() {
               onCheckCatalog={() => void checkCatalogs()}
             />
           )}
-          {page === "library" && <TestLibrary suites={suites} sources={sources} onRunSuite={() => navigate("new-run")} />}
-          {page === "new-run" && <NewEvaluation suites={suites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
+          {page === "library" && <TestLibrary suites={allSuites} sources={sources} onRunSuite={() => navigate("new-run")} />}
+          {page === "authoring" && (
+            <Authoring
+              localSuites={localSuites}
+              onChange={persistLocalSuites}
+              onRunSuite={(suite) => { navigate("new-run"); setInitialSuiteKey(suiteKey(suite)); }}
+            />
+          )}
+          {page === "new-run" && <NewEvaluation initialSuiteKey={initialSuiteKey} suites={allSuites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
           {page === "live-run" && (
             <LiveRun run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
           )}
@@ -347,7 +389,7 @@ function App() {
               runs={runs}
               selected={selectedRun}
               connections={connections}
-              suites={suites}
+              suites={allSuites}
               onSelect={setSelectedRunId}
               onNew={() => navigate("new-run")}
               onSaveReview={saveResultReview}
@@ -370,6 +412,294 @@ function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Authoring (Tier 1, M2) — local suite editor.
+//
+// A new top-level section for authoring v1 (single-turn) suites in-app. The
+// three-pane editor (form / canonical YAML / checks) mirrors
+// docs/SUITE_AUTHORING.md §7. Structural validation reuses the catalog loader's
+// zod schema; the YAML pane and export use the same canonical serializer the
+// build hashes, so an exported file is publishable unmodified.
+// ---------------------------------------------------------------------------
+
+const riskOptions: Array<{ value: TestSuite["risk"]; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "moderate", label: "Moderate" },
+  { value: "high", label: "High" }
+];
+
+const evaluatorTypeOptions: Array<{ value: string; label: string }> = [
+  { value: "contains_any", label: "Contains any of" },
+  { value: "contains_none", label: "Contains none of" },
+  { value: "regex", label: "Matches regex" },
+  { value: "non_empty", label: "Non-empty response" },
+  { value: "valid_json", label: "Valid JSON" },
+  { value: "human_review", label: "Human review" }
+];
+
+function newEvaluator(type: Evaluator["type"]): Evaluator {
+  switch (type) {
+    case "contains_any": case "contains_none": return { type, values: [] };
+    case "regex": return { type, pattern: "" };
+    case "human_review": return { type, rubric: "" };
+    case "valid_json": return { type };
+    default: return { type: "non_empty" };
+  }
+}
+
+function StringListEditor({ label, values, onChange }: { label: string; values: string[]; onChange: (values: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const commit = () => {
+    const parts = draft.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length) onChange([...values, ...parts]);
+    setDraft("");
+  };
+  return (
+    <div className="field">
+      <span>{label}</span>
+      {values.length > 0 && (
+        <div className="chip-list">
+          {values.map((value, index) => (
+            <span key={`${value}-${index}`} className="chip">
+              {value}
+              <button type="button" className="chip-remove" onClick={() => onChange(values.filter((_, i) => i !== index))} aria-label={`Remove ${value}`}><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="chip-add">
+        <input aria-label={`${label} item`} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Add an item, comma-separated" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} />
+        <button type="button" className="button button-secondary button-small" onClick={commit}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+function EvaluatorEditor({ evaluator, onChange, onRemove }: { evaluator: Evaluator; onChange: (evaluator: Evaluator) => void; onRemove: () => void }) {
+  const type = evaluator.type;
+  const set = (patch: Partial<Evaluator>) => onChange({ ...evaluator, ...patch } as Evaluator);
+  return (
+    <div className="evaluator-card">
+      <div className="evaluator-card-head">
+        <select value={type} onChange={(event) => onChange(newEvaluator(event.target.value as Evaluator["type"]))} aria-label="Evaluator type">
+          {evaluatorTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <button type="button" className="icon-button small danger" onClick={onRemove} aria-label="Remove evaluator"><Trash2 size={15} /></button>
+      </div>
+      {(type === "contains_any" || type === "contains_none") && (
+        <>
+          <StringListEditor label={type === "contains_any" ? "Expected phrases (any match passes)" : "Excluded phrases (any match fails)"} values={evaluator.values} onChange={(values) => set({ values })} />
+          <label className="toggle-row"><input type="checkbox" checked={evaluator.caseSensitive ?? false} onChange={(event) => set({ caseSensitive: event.target.checked })} /> Case-sensitive</label>
+        </>
+      )}
+      {type === "regex" && (
+        <>
+          <label className="field"><span>Pattern</span><input value={evaluator.pattern} onChange={(event) => set({ pattern: event.target.value })} placeholder="e.g. ^I cannot" /></label>
+          <label className="field"><span>Flags (optional)</span><input value={evaluator.flags ?? ""} onChange={(event) => set({ flags: event.target.value })} placeholder="e.g. i" /></label>
+        </>
+      )}
+      {type === "non_empty" && (
+        <label className="field"><span>Minimum characters (optional)</span><input type="number" min={1} value={evaluator.minimumCharacters ?? ""} onChange={(event) => set({ minimumCharacters: event.target.value ? Number(event.target.value) : undefined })} /></label>
+      )}
+      {type === "human_review" && (
+        <label className="field"><span>Rubric</span><textarea value={evaluator.rubric} onChange={(event) => set({ rubric: event.target.value })} placeholder="What a human reviewer should look for" /></label>
+      )}
+    </div>
+  );
+}
+
+export function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSuite[]; onChange: React.Dispatch<React.SetStateAction<LocalSuite[]>>; onRunSuite: (suite: TestSuite) => void }) {
+  const [selectedId, setSelectedId] = useState<string | null>(localSuites[0]?.localId ?? null);
+  const selected = localSuites.find((local) => local.localId === selectedId) ?? null;
+
+  const createSuite = () => {
+    let id = "my-suite";
+    for (let suffix = 2; localSuites.some((local) => local.suite.id === id); suffix++) id = `my-suite-${suffix}`;
+    const fresh = newLocalSuite({ id });
+    onChange((current) => [...current, fresh]);
+    setSelectedId(fresh.localId);
+  };
+
+  const removeSuite = (id: string) => {
+    onChange((current) => current.filter((local) => local.localId !== id));
+    if (selectedId === id) setSelectedId(localSuites.find((local) => local.localId !== id)?.localId ?? null);
+  };
+
+  const update = (next: LocalSuite) => onChange((current) => current.map((local) => (local.localId === next.localId ? next : local)));
+
+  const save = async (local: LocalSuite) => {
+    const canonical = await canonicalize(local);
+    onChange((current) => current.map((item) =>
+      item.localId === local.localId && item === local ? canonical : item
+    ));
+  };
+
+  const exportYaml = (local: LocalSuite) => {
+    const name = `${local.suite.id}-${local.suite.version}.yaml`;
+    const blob = new Blob([local.yaml], { type: "text/yaml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (!selected) {
+    return (
+      <>
+        <PageTitle eyebrow="Authoring" title="Author a test suite" description="Create and edit single-turn (v1) suites locally. Exported YAML is publishable to ai4h-test-suites unmodified." action={<button className="button button-primary" onClick={createSuite}><Plus size={16} /> New suite</button>} />
+        <div className="panel authoring-empty">
+          <PenLine size={26} />
+          <div>
+            <strong>No local suites yet</strong>
+            <p>Create your first suite. Local suites are stored on this device and never uploaded.</p>
+          </div>
+          <button className="button button-primary" onClick={createSuite}><Plus size={16} /> New suite</button>
+        </div>
+      </>
+    );
+  }
+
+  const editing = selected;
+  const suite = editing.suite;
+  const validation = validateSuite(suite);
+  const yaml = canonicalYaml(suite);
+
+  const setSuite = (patch: Partial<TestSuite>) => update(withSuite(editing, { ...suite, ...patch }));
+  const setCase = (index: number, patch: Partial<SingleTurnTestCase>) => setSuite({ cases: suite.cases.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
+  const addCase = () => setSuite({ cases: [...suite.cases, { id: `case-${suite.cases.length + 1}`, title: `Case ${suite.cases.length + 1}`, messages: [{ role: "user", content: "" }], evaluators: [{ type: "non_empty" }] }] });
+  const removeCase = (index: number) => setSuite({ cases: suite.cases.filter((_, i) => i !== index) });
+
+  return (
+    <>
+      <PageTitle
+        eyebrow="Authoring"
+        title={suite.title}
+        description={`v${suite.version} · ${suite.cases.length} ${suite.cases.length === 1 ? "case" : "cases"} · ${validation.publishable ? "publishable" : validation.runnable ? "runnable" : "incomplete"}`}
+        action={
+          <div className="authoring-actions">
+            {editing.dirty && <span className="dirty-flag">Unsaved changes</span>}
+            <button className="button button-secondary" onClick={() => onRunSuite(suite)} disabled={editing.dirty || !validation.runnable}><Play size={15} /> Run this suite</button>
+            <button className="button button-secondary" onClick={() => exportYaml(editing)} disabled={editing.dirty || !validation.publishable}><Download size={15} /> Export YAML</button>
+            <button className="button button-primary" onClick={() => void save(editing)}><Check size={15} /> Save &amp; canonicalize</button>
+          </div>
+        }
+      />
+      <div className="authoring-actions">
+        <label className="field"><span>Local suite</span><select aria-label="Local suite" value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value)}>
+          {localSuites.map((local) => <option key={local.localId} value={local.localId}>{local.suite.title} · {local.suite.id} v{local.suite.version}</option>)}
+        </select></label>
+        <button className="button button-secondary" onClick={createSuite}><Plus size={16} /> New suite</button>
+        <button className="button button-secondary" onClick={() => removeSuite(editing.localId)}><Trash2 size={16} /> Delete suite</button>
+      </div>
+      <div className="authoring-layout" key={editing.localId}>
+        <section className="panel authoring-form">
+          <div className="step-heading"><span>M</span><div><h3>Suite metadata</h3><p>Identifies the suite in the catalog and in results.</p></div></div>
+          <div className="field-grid">
+            <label className="field"><span>Suite id</span><input value={suite.id} onChange={(event) => setSuite({ id: event.target.value })} placeholder="my-attack-suite" /></label>
+            <label className="field"><span>Version</span><input value={suite.version} onChange={(event) => setSuite({ version: event.target.value })} placeholder="0.1.0" /></label>
+            <label className="field"><span>Title</span><input value={suite.title} onChange={(event) => setSuite({ title: event.target.value })} /></label>
+            <label className="field"><span>Category</span><input value={suite.category} onChange={(event) => setSuite({ category: event.target.value })} /></label>
+            <label className="field"><span>Risk</span><select value={suite.risk} onChange={(event) => setSuite({ risk: event.target.value as TestSuite["risk"] })}>{riskOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label className="field"><span>License</span><input value={suite.license} onChange={(event) => setSuite({ license: event.target.value })} placeholder="CC-BY-4.0" /></label>
+            <label className="field"><span>Author</span><input value={suite.author} onChange={(event) => setSuite({ author: event.target.value })} /></label>
+          </div>
+          <label className="field"><span>Summary</span><textarea value={suite.summary} onChange={(event) => setSuite({ summary: event.target.value })} /></label>
+          <StringListEditor label="Tags" values={suite.tags} onChange={(tags) => setSuite({ tags })} />
+          <StringListEditor label="Limitations (what this suite does NOT establish)" values={suite.limitations ?? []} onChange={(limitations) => setSuite({ limitations })} />
+
+          <div className="step-heading cases-heading"><span>C</span><div><h3>Cases</h3><p>Each case is one prompt (or prompt sequence) with its evaluators.</p></div><button type="button" className="button button-secondary button-small" onClick={addCase}><Plus size={14} /> Add case</button></div>
+          {suite.cases.map((rawCase, index) => {
+            const testCase = rawCase as SingleTurnTestCase;
+            return (
+            <div className="case-card" key={index}>
+              <div className="case-card-head">
+                <strong>Case {index + 1}</strong>
+                <button type="button" className="icon-button small danger" onClick={() => removeCase(index)} aria-label="Remove case"><Trash2 size={15} /></button>
+              </div>
+              <div className="field-grid">
+                <label className="field"><span>Case id</span><input value={testCase.id} onChange={(event) => setCase(index, { id: event.target.value })} /></label>
+                <label className="field"><span>Case title</span><input value={testCase.title} onChange={(event) => setCase(index, { title: event.target.value })} /></label>
+              </div>
+              <label className="field"><span>Description (optional)</span><input value={testCase.description ?? ""} onChange={(event) => setCase(index, { description: event.target.value || undefined })} /></label>
+              <div className="messages-editor">
+                <span className="sub-label">Messages</span>
+                {testCase.messages.map((message, messageIndex) => (
+                  <div className="message-row" key={messageIndex}>
+                    <select value={message.role} onChange={(event) => setCase(index, { messages: testCase.messages.map((m, i) => (i === messageIndex ? { ...m, role: event.target.value as ChatMessage["role"] } : m)) })} aria-label="Message role">
+                      <option value="system">system</option>
+                      <option value="user">user</option>
+                      <option value="assistant">assistant</option>
+                    </select>
+                    <textarea value={message.content} onChange={(event) => setCase(index, { messages: testCase.messages.map((m, i) => (i === messageIndex ? { ...m, content: event.target.value } : m)) })} placeholder="Message content" />
+                    <button type="button" className="icon-button small danger" onClick={() => setCase(index, { messages: testCase.messages.filter((_, i) => i !== messageIndex) })} aria-label="Remove message"><X size={15} /></button>
+                  </div>
+                ))}
+                <button type="button" className="text-button" onClick={() => setCase(index, { messages: [...testCase.messages, { role: "user", content: "" }] })}><Plus size={13} /> Add message</button>
+              </div>
+              <div className="evaluators-editor">
+                <span className="sub-label">Evaluators</span>
+                {testCase.evaluators.map((evaluator, evaluatorIndex) => (
+                  <EvaluatorEditor
+                    key={evaluatorIndex}
+                    evaluator={evaluator}
+                    onRemove={() => setCase(index, { evaluators: testCase.evaluators.filter((_, i) => i !== evaluatorIndex) })}
+                    onChange={(next) => setCase(index, { evaluators: testCase.evaluators.map((e, i) => (i === evaluatorIndex ? next : e)) })}
+                  />
+                ))}
+                <button type="button" className="text-button" onClick={() => setCase(index, { evaluators: [...testCase.evaluators, { type: "non_empty" }] })}><Plus size={13} /> Add evaluator</button>
+              </div>
+            </div>
+            );
+          })}
+        </section>
+
+        <section className="panel authoring-yaml">
+          <div className="panel-heading"><div><h3>Canonical YAML</h3><p>Exactly what will be committed — deterministic and hash-stable.</p></div></div>
+          <pre className="yaml-view">{yaml}</pre>
+        </section>
+
+        <section className="panel authoring-checks">
+          <div className="panel-heading"><div><h3>Checks</h3><p>Same validation the official build runs.</p></div></div>
+          <div className="checks-body">
+            <div className="checks-status">
+              <span className={`checks-pill ${validation.runnable ? "pass" : "fail"}`}>{validation.runnable ? "Runnable" : "Not runnable"}</span>
+              <span className={`checks-pill ${validation.publishable ? "pass" : "fail"}`}>{validation.publishable ? "Publishable" : "Not publishable"}</span>
+            </div>
+            {validation.structural.length > 0 && (
+              <div className="checks-group">
+                <span className="sub-label">Structural schema</span>
+                <ul className="checks-list">
+                  {validation.structural.map((issue, index) => <li key={index} className="fail">{issue}</li>)}
+                </ul>
+              </div>
+            )}
+            {validation.publication.length > 0 && (
+              <div className="checks-group">
+                <span className="sub-label">Publication schema</span>
+                <ul className="checks-list">{validation.publication.map((issue, index) => <li key={index} className="fail">{issue}</li>)}</ul>
+              </div>
+            )}
+            <div className="checks-group">
+              <span className="sub-label">Identity</span>
+              <ul className="checks-list">
+                {validation.identity.map((check) => (
+                  <li key={check.id} className={check.pass ? "pass" : "fail"}>
+                    {check.pass ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                    <span>{check.label}{check.hint ? <small>{check.hint}</small> : null}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <p className="checks-note">A suite is runnable when the structural schema passes, and publishable when structural, identity, and publication schema checks all pass. Save and canonicalize before running or exporting. The v3 marker lint (M3) will appear here for agent suites.</p>
+          </div>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -611,8 +941,8 @@ function SuiteInspector({ suite, onClose }: { suite: TestSuite; onClose: () => v
 
 type SuiteSort = "released-desc" | "released-asc" | "title-asc" | "category-asc" | "tests-desc" | "risk-desc";
 
-function NewEvaluation({ suites, connections, onStart, onConnections }: { suites: TestSuite[]; connections: Connection[]; onStart: (name: string, suites: TestSuite[], targets: RunTarget[]) => void; onConnections: () => void }) {
-  const [selectedSuiteIds, setSelectedSuiteIds] = useState<string[]>(suites.slice(0, 1).map((suite) => suite.id));
+export function NewEvaluation({ suites, connections, onStart, onConnections, initialSuiteKey }: { initialSuiteKey?: string; suites: TestSuite[]; connections: Connection[]; onStart: (name: string, suites: TestSuite[], targets: RunTarget[]) => void; onConnections: () => void }) {
+  const [selectedSuiteKeys, setSelectedSuiteKeys] = useState<string[]>(initialSuiteKey ? suites.filter((suite) => suiteKey(suite) === initialSuiteKey).map(suiteKey) : suites.slice(0, 1).map(suiteKey));
   const [targets, setTargets] = useState<Array<{ connectionId: string; model: string }>>([]);
   const [name, setName] = useState(`Model safety evaluation · ${new Date().toLocaleDateString()}`);
   const [suiteSearch, setSuiteSearch] = useState("");
@@ -620,7 +950,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
   const [suiteRisk, setSuiteRisk] = useState("all");
   const [suiteFormat, setSuiteFormat] = useState("all");
   const [suiteSort, setSuiteSort] = useState<SuiteSort>("released-desc");
-  const selectedSuites = suites.filter((suite) => selectedSuiteIds.includes(suite.id));
+  const selectedSuites = suites.filter((suite) => selectedSuiteKeys.includes(suiteKey(suite)));
   const categories = useMemo(() => [...new Set(suites.map((suite) => suite.category))].sort((a, b) => a.localeCompare(b)), [suites]);
 
   const visibleSuites = useMemo(() => {
@@ -644,14 +974,14 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
   }, [suites, suiteSearch, suiteCategory, suiteRisk, suiteFormat, suiteSort]);
 
   const filtersActive = suiteSearch.trim() !== "" || suiteCategory !== "all" || suiteRisk !== "all" || suiteFormat !== "all";
-  const allVisibleSelected = visibleSuites.length > 0 && visibleSuites.every((suite) => selectedSuiteIds.includes(suite.id));
+  const allVisibleSelected = visibleSuites.length > 0 && visibleSuites.every((suite) => selectedSuiteKeys.includes(suiteKey(suite)));
   const visibleTestCount = visibleSuites.reduce((sum, suite) => sum + suite.cases.length, 0);
-  const hiddenSelectedCount = selectedSuites.filter((suite) => !visibleSuites.some((item) => item.id === suite.id)).length;
+  const hiddenSelectedCount = selectedSuites.filter((suite) => !visibleSuites.some((item) => suiteKey(item) === suiteKey(suite))).length;
   const totalRequests = selectedSuites.reduce((sum, suite) => sum + suiteRequestCount(suite), 0) * Math.max(targets.length, 1);
 
-  const toggleSuite = (id: string) => setSelectedSuiteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  const toggleAllSuites = () => setSelectedSuiteIds((current) => {
-    const visibleIds = visibleSuites.map((suite) => suite.id);
+  const toggleSuite = (key: string) => setSelectedSuiteKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  const toggleAllSuites = () => setSelectedSuiteKeys((current) => {
+    const visibleIds = visibleSuites.map(suiteKey);
     if (allVisibleSelected) return current.filter((id) => !visibleIds.includes(id));
     return [...new Set([...current, ...visibleIds])];
   });
@@ -684,7 +1014,7 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
             <label className="field"><span>Evaluation name</span><input value={name} onChange={(event) => setName(event.target.value)} /></label>
           </section>
           <section className="panel builder-section">
-            <div className="step-heading"><span>2</span><div><h3>Select test suites</h3><p>Suite contents and version hashes are stored with the result.</p></div><strong>{selectedSuiteIds.length} selected</strong></div>
+            <div className="step-heading"><span>2</span><div><h3>Select test suites</h3><p>Suite contents and version hashes are stored with the result.</p></div><strong>{selectedSuiteKeys.length} selected</strong></div>
             <div className="suite-filter-bar">
               <label className="search-box small"><Search size={16} /><input value={suiteSearch} onChange={(event) => setSuiteSearch(event.target.value)} placeholder="Search suites, tags, or categories…" aria-label="Search test suites" /></label>
               <select value={suiteCategory} onChange={(event) => setSuiteCategory(event.target.value)} aria-label="Filter by category">
@@ -718,13 +1048,15 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
                 <span className="check-box">{allVisibleSelected && <Check size={14} />}</span>
                 <span><strong>{allVisibleSelected ? (filtersActive ? "All shown suites selected" : "All tests selected") : (filtersActive ? "Select all shown suites" : "Select all tests")}</strong><small>{visibleTestCount} {visibleTestCount === 1 ? "test" : "tests"} across {visibleSuites.length} {filtersActive ? `of ${suites.length} ` : ""}{visibleSuites.length === 1 && !filtersActive ? "suite" : "suites"}{hiddenSelectedCount ? ` · ${hiddenSelectedCount} selected outside this filter` : ""}</small></span>
               </button>
-              {selectedSuiteIds.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedSuiteIds([])}>Clear selection</button>}
+              {selectedSuiteKeys.length > 0 && <button type="button" className="text-button" onClick={() => setSelectedSuiteKeys([])}>Clear selection</button>}
             </div>
             {visibleSuites.length ? (
               <div className="suite-picker">
-                {visibleSuites.map((suite) => (
-                  <button type="button" key={suite.id} className={selectedSuiteIds.includes(suite.id) ? "selected" : ""} aria-pressed={selectedSuiteIds.includes(suite.id)} onClick={() => toggleSuite(suite.id)}>
-                    <span className="check-box">{selectedSuiteIds.includes(suite.id) && <Check size={14} />}</span>
+                {visibleSuites.map((suite) => {
+                  const key = suiteKey(suite);
+                  return (
+                  <button type="button" key={key} className={selectedSuiteKeys.includes(key) ? "selected" : ""} aria-pressed={selectedSuiteKeys.includes(key)} onClick={() => toggleSuite(key)}>
+                    <span className="check-box">{selectedSuiteKeys.includes(key) && <Check size={14} />}</span>
                     <span className="picker-main">
                       <strong>{suite.title}</strong>
                       <small>{suite.category} · {suite.cases.length} tests{suite.schemaVersion === 2 ? ` · ${suiteRequestCount(suite)} stages · multi-turn v2` : suite.schemaVersion === 3 ? " · paired agent tool-use v3" : ""} · v{suite.version}</small>
@@ -732,7 +1064,8 @@ function NewEvaluation({ suites, connections, onStart, onConnections }: { suites
                     </span>
                     <span className={`risk-badge ${suite.risk}`}>{suite.risk}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="suite-picker-empty">No test suites match these filters. <button type="button" className="text-button" onClick={resetSuiteFilters}>Reset filters</button></p>
@@ -1591,6 +1924,13 @@ function formatCatalogDate(value?: string): string {
 function suiteReleaseTime(suite: TestSuite): number {
   const parsed = suite.releasedAt ? new Date(suite.releasedAt).getTime() : Number.NaN;
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+// A local suite can share an id@version with a remote one (kept separate by
+// sourceId, docs/SUITE_AUTHORING.md §4.2), so selection keys on a composite
+// identity rather than the bare id.
+function suiteKey(suite: TestSuite): string {
+  return `${suite.sourceId}:${suite.id}@${suite.version}`;
 }
 
 function formatEvaluatorCriteria(evaluator: Evaluator): string {
