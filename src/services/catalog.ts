@@ -24,6 +24,7 @@ const suiteMetadataSchema = z.object({
   license: z.string(),
   author: z.string(),
   tags: z.array(z.string()),
+  limitations: z.array(z.string()).optional(),
   sourceId: z.string().optional().default("external"),
   releasedAt: z.string().optional(),
   contentHash: z.string().optional()
