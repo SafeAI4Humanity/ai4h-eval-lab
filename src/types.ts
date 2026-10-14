@@ -130,6 +130,7 @@ export type TestSuite = {
   license: string;
   author: string;
   tags: string[];
+  limitations?: string[];
   sourceId: string;
   releasedAt?: string;
   contentHash?: string;
