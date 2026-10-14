@@ -50,15 +50,16 @@ Design: `docs/SUITE_AUTHORING.md`.
   unchanged; run flow now keys suites by `sourceId:id@version`).
 - "Export" → downloads the canonical YAML + computed hash.
 - `src/services/localSuites.ts` — factory, `withSuite`, `canonicalize`,
-  `validateSuite` (zod + identity checks).
+  `validateSuite` (zod + identity checks + the pinned official publication schema).
 - **zod ↔ build parity fix:** `tags` now enforces the build's rule
   (`minItems:1`, unique, `^[a-z0-9-]+$`) — previously the app allowed empty
   tags, which the real build rejects. Caught by the M2 exit test.
 - `src/services/localSuites.test.ts` + `src/services/m2-exit.test.ts` — the
   exit test authors a suite in-app and validates the exported YAML against the
-  **real** build's ajv schema (publishable to ai4h-test-suites).
+  pinned official build's ajv schema (publishable to ai4h-test-suites), without
+  requiring a sibling checkout or its node_modules.
 - **Exit:** author a v1 suite in-app, run it, export YAML the real build
-  accepts. ✅ (69/69 tests; tsc + vite build green)
+  accepts. ✅ (88/88 tests; tsc + vite build green)
 
 ### M3 — v2 + v3 authoring
 - v2 form (setup + 2–8 turns) and v3 form (task, scope, canaries, sourceTool,
@@ -115,8 +116,9 @@ Last, because it multiplies spend and rate-limit pressure.
 ## Cross-cutting
 
 - **zod ↔ JSON-Schema parity test** (Feature A, M2): a suite that passes the app's
-  zod passes the build's ajv and vice versa. Guards against the two schema
-  definitions drifting. (Note: `types.ts` declares 3 extra evaluator types —
+  publication checks run against a checked-in copy of the build's ajv schema.
+  Negative regression cases cover constraints absent from the catalog zod
+  schema, including metadata lengths, version format, and extra properties. (Note: `types.ts` declares 3 extra evaluator types —
   `forbidden_tool_calls`, `forbidden_tool_arguments`, `scope_adherence` — that are
   v3-internal *trace evaluators* applied by the agent runner (evaluators.ts:40).
   They are NOT in the published v1/v2 JSON Schema and no suite uses them, so the

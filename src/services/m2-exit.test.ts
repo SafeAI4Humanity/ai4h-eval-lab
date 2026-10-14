@@ -1,8 +1,6 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import Ajv2020 from "ajv/dist/2020";
+import addFormats from "ajv-formats";
+import publicationSchema from "../data/suite.schema.json";
 import { createHash } from "node:crypto";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -10,8 +8,9 @@ import { canonicalYaml, hashSuiteYaml, toExportObject } from "./canonical";
 import { canonicalize, newLocalSuite, validateSuite, withSuite } from "./localSuites";
 import type { SingleTurnTestCase } from "../types";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const suitesRoot = join(here, "..", "..", "..", "ai4h-test-suites");
+const ajv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(ajv);
+const validate = ajv.compile(publicationSchema);
 
 // Author a v1 suite in-app, exactly as the editor would.
 function authorSuite() {
@@ -57,34 +56,10 @@ describe("M2 exit: author → run → export (the real build accepts the YAML)",
     expect(parse(canonical.yaml)).toEqual(toExportObject(canonical.suite));
   });
 
-  it("passes the REAL build's ajv schema (publishable to ai4h-test-suites)", async () => {
+  it("passes the pinned official build's ajv schema (publishable to ai4h-test-suites)", async () => {
     const canonical = await canonicalize(authorSuite());
-    const tmp = mkdtempSync(join(tmpdir(), "m2-"));
-    const yamlPath = join(tmp, "m2-exit-check.yaml");
-    writeFileSync(yamlPath, canonical.yaml);
-
-    const validateScript = `
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { parse } from "yaml";
-import { readFileSync } from "node:fs";
-const ajv = new Ajv2020({ allErrors: true, strict: true });
-addFormats(ajv);
-const schema = JSON.parse(readFileSync("${suitesRoot}/schema/suite.schema.json", "utf8"));
-const validate = ajv.compile(schema);
-const suite = parse(readFileSync("${yamlPath}", "utf8"));
-if (!validate(suite)) {
-  console.error("SCHEMA VALIDATION FAILED:\\n" + validate.errors.map((e) => e.instancePath + " " + e.message).join("\\n"));
-  process.exit(1);
-}
-console.log("SCHEMA VALIDATION PASSED");
-`;
-    const out = execFileSync("node", ["--input-type=module", "-e", validateScript], {
-      cwd: suitesRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    expect(out).toContain("SCHEMA VALIDATION PASSED");
+    const exported = parse(canonical.yaml);
+    expect(validate(exported), JSON.stringify(validate.errors)).toBe(true);
   });
 
   it("hash parity: build sha256(bytes) === app hash", async () => {

@@ -1,5 +1,6 @@
-import { canonicalYaml, hashSuiteYaml } from "./canonical";
+import { canonicalYaml, hashSuiteYaml, toExportObject } from "./canonical";
 import { singleTurnSuiteSchema } from "./catalog";
+import { publicationSchemaErrors } from "./publicationSchema";
 import { storage } from "./storage";
 import type { LocalSuite, TestSuite } from "../types";
 
@@ -9,7 +10,8 @@ import type { LocalSuite, TestSuite } from "../types";
  * Owns the persistence of locally-authored suites and the validation that lets
  * the editor surface the same errors the official build would. Structural
  * validation reuses the catalog loader's zod schema (single source of truth);
- * identity checks mirror the build's duplicate-identity guards.
+ * publication validation uses the pinned official schema; identity checks
+ * mirror the build's duplicate-identity guards.
  *
  * See docs/SUITE_AUTHORING.md §4, §6, §10.
  */
@@ -18,7 +20,7 @@ const LOCAL_SOURCE_ID = "local";
 
 /** Read all locally-authored suites. */
 export function getLocalSuites(): LocalSuite[] {
-  return storage.getLocalSuites();
+  return storage.getLocalSuites().map((local) => ({ ...local, localId: local.localId ?? crypto.randomUUID() }));
 }
 
 /** Persist all locally-authored suites. */
@@ -51,6 +53,7 @@ export function newLocalSuite(partial?: Partial<Pick<TestSuite, "id" | "title" |
     ]
   };
   return {
+    localId: crypto.randomUUID(),
     suite,
     yaml: canonicalYaml(suite),
     createdAt: now,
@@ -93,11 +96,13 @@ export type Check = {
 export type SuiteValidation = {
   /** Structural schema errors (zod). Empty when the suite is structurally valid. */
   structural: string[];
+  /** Errors against the pinned official YAML publication schema. */
+  publication: string[];
   /** Identity/uniqueness checks (suite id, case ids). */
   identity: Check[];
   /** True when the structural schema passes — the suite is runnable. */
   runnable: boolean;
-  /** True when structural + identity all pass — the suite is publishable. */
+  /** True when structural, publication schema, and identity checks all pass. */
   publishable: boolean;
 };
 
@@ -146,11 +151,13 @@ export function validateSuite(suite: TestSuite): SuiteValidation {
   });
 
   const identityPass = identity.every((check) => check.pass);
+  const publication = publicationSchemaErrors(toExportObject(suite));
   return {
     structural,
+    publication,
     identity,
     runnable,
-    publishable: runnable && identityPass
+    publishable: runnable && identityPass && publication.length === 0
   };
 }
 
@@ -161,4 +168,9 @@ export function validateSuite(suite: TestSuite): SuiteValidation {
  */
 export function runnableSuite(local: LocalSuite): TestSuite {
   return { ...local.suite, contentHash: local.contentHash || undefined };
+}
+
+/** Only saved, structurally valid drafts may enter the run flow. */
+export function availableLocalSuites(locals: LocalSuite[]): TestSuite[] {
+  return locals.filter((local) => !local.dirty && validateSuite(local.suite).runnable).map(runnableSuite);
 }

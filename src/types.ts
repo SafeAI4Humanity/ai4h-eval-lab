@@ -289,6 +289,8 @@ export type ProviderResponse = {
  * a runnable/exportable suite while `dirty` is true. See docs/SUITE_AUTHORING.md §4.1.
  */
 export type LocalSuite = {
+  /** Stable editor identity, independent of the editable catalog id. */
+  localId: string;
   suite: TestSuite;
   yaml: string;
   /** sha256:<64-hex> fingerprint of `yaml`. Absent while the suite is dirty. */

@@ -55,11 +55,10 @@ import {
   canonicalize,
   getLocalSuites,
   newLocalSuite,
-  runnableSuite,
+  availableLocalSuites,
   setLocalSuites,
   validateSuite,
-  withSuite,
-  type Check as CheckResult
+  withSuite
 } from "./services/localSuites";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
 import {
@@ -190,17 +189,21 @@ function App() {
     storage.setRuns(next);
   };
 
-  const persistLocalSuites = (next: LocalSuite[]) => {
-    setLocalSuitesState(next);
-    setLocalSuites(next);
+  const persistLocalSuites: React.Dispatch<React.SetStateAction<LocalSuite[]>> = (change) => {
+    setLocalSuitesState((current) => {
+      const next = typeof change === "function" ? change(current) : change;
+      setLocalSuites(next);
+      return next;
+    });
   };
+  const [initialSuiteKey, setInitialSuiteKey] = useState<string | undefined>();
 
   // Local suites are first-class in the library and run flow (docs/SUITE_AUTHORING.md
   // §4.2): they join the same TestSuite[] the runner consumes, kept separate from
   // remote suites by sourceId. They live in their own state so a catalog refresh
   // never wipes them.
   const allSuites = useMemo<TestSuite[]>(
-    () => [...localSuites.map((local) => runnableSuite(local)), ...suites],
+    () => [...availableLocalSuites(localSuites), ...suites],
     [localSuites, suites]
   );
 
@@ -274,6 +277,7 @@ function App() {
 
   const navigate = (next: Page) => {
     setPage(next);
+    setInitialSuiteKey(undefined);
     setMobileNav(false);
   };
 
@@ -373,10 +377,10 @@ function App() {
             <Authoring
               localSuites={localSuites}
               onChange={persistLocalSuites}
-              onRunSuite={() => navigate("new-run")}
+              onRunSuite={(suite) => { navigate("new-run"); setInitialSuiteKey(suiteKey(suite)); }}
             />
           )}
-          {page === "new-run" && <NewEvaluation suites={allSuites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
+          {page === "new-run" && <NewEvaluation initialSuiteKey={initialSuiteKey} suites={allSuites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
           {page === "live-run" && (
             <LiveRun run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
           )}
@@ -385,7 +389,7 @@ function App() {
               runs={runs}
               selected={selectedRun}
               connections={connections}
-              suites={suites}
+              suites={allSuites}
               onSelect={setSelectedRunId}
               onNew={() => navigate("new-run")}
               onSaveReview={saveResultReview}
@@ -436,6 +440,16 @@ const evaluatorTypeOptions: Array<{ value: string; label: string }> = [
   { value: "human_review", label: "Human review" }
 ];
 
+function newEvaluator(type: Evaluator["type"]): Evaluator {
+  switch (type) {
+    case "contains_any": case "contains_none": return { type, values: [] };
+    case "regex": return { type, pattern: "" };
+    case "human_review": return { type, rubric: "" };
+    case "valid_json": return { type };
+    default: return { type: "non_empty" };
+  }
+}
+
 function StringListEditor({ label, values, onChange }: { label: string; values: string[]; onChange: (values: string[]) => void }) {
   const [draft, setDraft] = useState("");
   const commit = () => {
@@ -457,23 +471,23 @@ function StringListEditor({ label, values, onChange }: { label: string; values: 
         </div>
       )}
       <div className="chip-add">
-        <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Add an item, comma-separated" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} />
+        <input aria-label={`${label} item`} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Add an item, comma-separated" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} />
         <button type="button" className="button button-secondary button-small" onClick={commit}>Add</button>
       </div>
     </div>
   );
 }
 
-function EvaluatorEditor({ evaluator, onChange }: { evaluator: Evaluator; onChange: (evaluator: Evaluator) => void }) {
+function EvaluatorEditor({ evaluator, onChange, onRemove }: { evaluator: Evaluator; onChange: (evaluator: Evaluator) => void; onRemove: () => void }) {
   const type = evaluator.type;
   const set = (patch: Partial<Evaluator>) => onChange({ ...evaluator, ...patch } as Evaluator);
   return (
     <div className="evaluator-card">
       <div className="evaluator-card-head">
-        <select value={type} onChange={(event) => set({ type: event.target.value as Evaluator["type"] })} aria-label="Evaluator type">
+        <select value={type} onChange={(event) => onChange(newEvaluator(event.target.value as Evaluator["type"]))} aria-label="Evaluator type">
           {evaluatorTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <button type="button" className="icon-button small danger" onClick={() => onChange(evaluator)} aria-label="Remove evaluator" data-remove="true"><Trash2 size={15} /></button>
+        <button type="button" className="icon-button small danger" onClick={onRemove} aria-label="Remove evaluator"><Trash2 size={15} /></button>
       </div>
       {(type === "contains_any" || type === "contains_none") && (
         <>
@@ -497,26 +511,30 @@ function EvaluatorEditor({ evaluator, onChange }: { evaluator: Evaluator; onChan
   );
 }
 
-function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSuite[]; onChange: (suites: LocalSuite[]) => void; onRunSuite: () => void }) {
-  const [selectedId, setSelectedId] = useState<string | null>(localSuites[0]?.suite.id ?? null);
-  const selected = localSuites.find((local) => local.suite.id === selectedId) ?? null;
+export function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSuite[]; onChange: React.Dispatch<React.SetStateAction<LocalSuite[]>>; onRunSuite: (suite: TestSuite) => void }) {
+  const [selectedId, setSelectedId] = useState<string | null>(localSuites[0]?.localId ?? null);
+  const selected = localSuites.find((local) => local.localId === selectedId) ?? null;
 
   const createSuite = () => {
-    const fresh = newLocalSuite();
-    onChange([...localSuites, fresh]);
-    setSelectedId(fresh.suite.id);
+    let id = "my-suite";
+    for (let suffix = 2; localSuites.some((local) => local.suite.id === id); suffix++) id = `my-suite-${suffix}`;
+    const fresh = newLocalSuite({ id });
+    onChange((current) => [...current, fresh]);
+    setSelectedId(fresh.localId);
   };
 
   const removeSuite = (id: string) => {
-    onChange(localSuites.filter((local) => local.suite.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    onChange((current) => current.filter((local) => local.localId !== id));
+    if (selectedId === id) setSelectedId(localSuites.find((local) => local.localId !== id)?.localId ?? null);
   };
 
-  const update = (next: LocalSuite) => onChange(localSuites.map((local) => (local.suite.id === next.suite.id ? next : local)));
+  const update = (next: LocalSuite) => onChange((current) => current.map((local) => (local.localId === next.localId ? next : local)));
 
   const save = async (local: LocalSuite) => {
     const canonical = await canonicalize(local);
-    onChange(localSuites.map((item) => (item.suite.id === canonical.suite.id ? canonical : item)));
+    onChange((current) => current.map((item) =>
+      item.localId === local.localId && item === local ? canonical : item
+    ));
   };
 
   const exportYaml = (local: LocalSuite) => {
@@ -538,7 +556,7 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
           <PenLine size={26} />
           <div>
             <strong>No local suites yet</strong>
-            <p>Create your first suite, or duplicate one from the Test library. Local suites are stored on this device and never uploaded.</p>
+            <p>Create your first suite. Local suites are stored on this device and never uploaded.</p>
           </div>
           <button className="button button-primary" onClick={createSuite}><Plus size={16} /> New suite</button>
         </div>
@@ -565,13 +583,20 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
         action={
           <div className="authoring-actions">
             {editing.dirty && <span className="dirty-flag">Unsaved changes</span>}
-            <button className="button button-secondary" onClick={() => onRunSuite()} disabled={!validation.runnable}><Play size={15} /> Run this suite</button>
-            <button className="button button-secondary" onClick={() => exportYaml(editing)} disabled={editing.dirty}><Download size={15} /> Export YAML</button>
+            <button className="button button-secondary" onClick={() => onRunSuite(suite)} disabled={editing.dirty || !validation.runnable}><Play size={15} /> Run this suite</button>
+            <button className="button button-secondary" onClick={() => exportYaml(editing)} disabled={editing.dirty || !validation.publishable}><Download size={15} /> Export YAML</button>
             <button className="button button-primary" onClick={() => void save(editing)}><Check size={15} /> Save &amp; canonicalize</button>
           </div>
         }
       />
-      <div className="authoring-layout">
+      <div className="authoring-actions">
+        <label className="field"><span>Local suite</span><select aria-label="Local suite" value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value)}>
+          {localSuites.map((local) => <option key={local.localId} value={local.localId}>{local.suite.title} · {local.suite.id} v{local.suite.version}</option>)}
+        </select></label>
+        <button className="button button-secondary" onClick={createSuite}><Plus size={16} /> New suite</button>
+        <button className="button button-secondary" onClick={() => removeSuite(editing.localId)}><Trash2 size={16} /> Delete suite</button>
+      </div>
+      <div className="authoring-layout" key={editing.localId}>
         <section className="panel authoring-form">
           <div className="step-heading"><span>M</span><div><h3>Suite metadata</h3><p>Identifies the suite in the catalog and in results.</p></div></div>
           <div className="field-grid">
@@ -591,7 +616,7 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
           {suite.cases.map((rawCase, index) => {
             const testCase = rawCase as SingleTurnTestCase;
             return (
-            <div className="case-card" key={testCase.id}>
+            <div className="case-card" key={index}>
               <div className="case-card-head">
                 <strong>Case {index + 1}</strong>
                 <button type="button" className="icon-button small danger" onClick={() => removeCase(index)} aria-label="Remove case"><Trash2 size={15} /></button>
@@ -622,6 +647,7 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
                   <EvaluatorEditor
                     key={evaluatorIndex}
                     evaluator={evaluator}
+                    onRemove={() => setCase(index, { evaluators: testCase.evaluators.filter((_, i) => i !== evaluatorIndex) })}
                     onChange={(next) => setCase(index, { evaluators: testCase.evaluators.map((e, i) => (i === evaluatorIndex ? next : e)) })}
                   />
                 ))}
@@ -652,6 +678,12 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
                 </ul>
               </div>
             )}
+            {validation.publication.length > 0 && (
+              <div className="checks-group">
+                <span className="sub-label">Publication schema</span>
+                <ul className="checks-list">{validation.publication.map((issue, index) => <li key={index} className="fail">{issue}</li>)}</ul>
+              </div>
+            )}
             <div className="checks-group">
               <span className="sub-label">Identity</span>
               <ul className="checks-list">
@@ -663,7 +695,7 @@ function Authoring({ localSuites, onChange, onRunSuite }: { localSuites: LocalSu
                 ))}
               </ul>
             </div>
-            <p className="checks-note">A suite is runnable when the structural schema passes, and publishable when structural + identity checks all pass. The v3 marker lint (M3) will appear here for agent suites.</p>
+            <p className="checks-note">A suite is runnable when the structural schema passes, and publishable when structural, identity, and publication schema checks all pass. Save and canonicalize before running or exporting. The v3 marker lint (M3) will appear here for agent suites.</p>
           </div>
         </section>
       </div>
@@ -909,8 +941,8 @@ function SuiteInspector({ suite, onClose }: { suite: TestSuite; onClose: () => v
 
 type SuiteSort = "released-desc" | "released-asc" | "title-asc" | "category-asc" | "tests-desc" | "risk-desc";
 
-function NewEvaluation({ suites, connections, onStart, onConnections }: { suites: TestSuite[]; connections: Connection[]; onStart: (name: string, suites: TestSuite[], targets: RunTarget[]) => void; onConnections: () => void }) {
-  const [selectedSuiteKeys, setSelectedSuiteKeys] = useState<string[]>(suites.slice(0, 1).map(suiteKey));
+export function NewEvaluation({ suites, connections, onStart, onConnections, initialSuiteKey }: { initialSuiteKey?: string; suites: TestSuite[]; connections: Connection[]; onStart: (name: string, suites: TestSuite[], targets: RunTarget[]) => void; onConnections: () => void }) {
+  const [selectedSuiteKeys, setSelectedSuiteKeys] = useState<string[]>(initialSuiteKey ? suites.filter((suite) => suiteKey(suite) === initialSuiteKey).map(suiteKey) : suites.slice(0, 1).map(suiteKey));
   const [targets, setTargets] = useState<Array<{ connectionId: string; model: string }>>([]);
   const [name, setName] = useState(`Model safety evaluation · ${new Date().toLocaleDateString()}`);
   const [suiteSearch, setSuiteSearch] = useState("");
