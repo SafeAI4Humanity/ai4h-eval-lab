@@ -1821,7 +1821,7 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
           <section className="panel settings-section" id="diagnostics-settings">
             <div className="panel-heading"><div><h3>Diagnostics & logging</h3><p>Local, redacted records for connection troubleshooting. Prompts, responses, and credentials are never logged.</p></div><span className="status-chip review">{diagnosticCount} entries</span></div>
             <div className="setting-row">
-              <div><strong>Logging level</strong><span>Network activity records request paths, status codes, timing, and safe error details</span></div>
+              <div><strong>Logging level</strong><span>Records request paths, status codes, timing, finish reasons, token counts, and response character counts—not response text</span></div>
               <select value={diagnosticConfig.level} onChange={(event) => updateDiagnostics({ ...diagnosticConfig, level: event.target.value as DiagnosticConfig["level"] })} aria-label="Diagnostic logging level">
                 <option value="off">Off</option>
                 <option value="error">Errors only</option>

@@ -27,7 +27,7 @@ The app runs on macOS and Linux, connects to local Ollama models and hosted LLM 
 - Local run history, comparison views, and portable JSON export
 - Automatic startup and manual GitHub release checks, with user-controlled installer downloads
 - Native operating-system credential storage in desktop builds
-- Configurable local diagnostic logging with redaction, retention limits, and JSON export
+- Configurable local diagnostic logging with redaction, retention limits, safe response metadata, and JSON export
 - No AI4H product telemetry
 
 ## Download and install

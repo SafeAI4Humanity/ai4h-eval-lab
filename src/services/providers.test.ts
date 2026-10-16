@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { assertKieCreditResponse, kieModelIds, normalizeProviderBaseUrl, ollamaThinkingSetting, parseAnthropicAgentTurn, parseOllamaModels, parseOpenAiAgentTurn, parseOpenAIModels, parseOpenRouterModels } from "./providers";
+import {
+  assertKieCreditResponse,
+  emptyProviderResponseMessage,
+  kieModelIds,
+  normalizeProviderBaseUrl,
+  ollamaThinkingSetting,
+  parseAnthropicAgentTurn,
+  parseAnthropicResponseEvidence,
+  parseGeminiResponseEvidence,
+  parseOllamaModels,
+  parseOllamaResponseEvidence,
+  parseOpenAiAgentTurn,
+  parseOpenAIModels,
+  parseOpenAiResponseEvidence,
+  parseOpenRouterModels,
+  providerResponseDiagnosticDetails
+} from "./providers";
 
 describe("parseOllamaModels", () => {
   it("extracts installed model names from the Ollama tags response", () => {
@@ -101,6 +117,73 @@ describe("ollamaThinkingSetting", () => {
 
   it("uses the lowest supported reasoning level for GPT-OSS", () => {
     expect(ollamaThinkingSetting("gpt-oss:latest")).toBe("low");
+  });
+});
+
+describe("provider response evidence", () => {
+  it("captures OpenAI-compatible finish reasons, usage, and final content for scoring", () => {
+    expect(parseOpenAiResponseEvidence({
+      choices: [{ finish_reason: "stop", message: { content: "A final answer that must not be logged." } }],
+      usage: { prompt_tokens: 12, completion_tokens: 9 }
+    })).toEqual({
+      text: "A final answer that must not be logged.",
+      promptTokens: 12,
+      completionTokens: 9,
+      reasoningCharacters: 0,
+      finishReason: "stop",
+      toolCallCount: 0,
+      textField: "choices[0].message.content"
+    });
+  });
+
+  it("reduces response evidence to non-content diagnostic metadata", () => {
+    const evidence = parseOpenAiResponseEvidence({
+      choices: [{ finish_reason: "stop", message: { content: "Sensitive final response" } }],
+      usage: { prompt_tokens: 12, completion_tokens: 9 }
+    });
+    const details = providerResponseDiagnosticDetails("openai-compatible", "test-model", 500, evidence, "text");
+    expect(details).toMatchObject({
+      provider: "openai-compatible",
+      model: "test-model",
+      contentCharacters: 24,
+      reasoningCharacters: 0,
+      finishReason: "stop",
+      promptTokens: 12,
+      completionTokens: 9,
+      requestedMaxTokens: 500,
+      textField: "choices[0].message.content"
+    });
+    expect(JSON.stringify(details)).not.toContain("Sensitive final response");
+  });
+
+  it("recognizes refusal text as a final OpenAI-compatible response", () => {
+    expect(parseOpenAiResponseEvidence({ choices: [{ finish_reason: "stop", message: { content: null, refusal: "I cannot help with that." } }] }))
+      .toMatchObject({ text: "I cannot help with that.", textField: "choices[0].message.refusal" });
+  });
+
+  it("diagnoses reasoning that exhausted the output allowance before a final answer", () => {
+    const evidence = parseOpenAiResponseEvidence({
+      choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "r".repeat(2400) } }],
+      usage: { completion_tokens: 500 }
+    });
+    expect(evidence).toMatchObject({ text: "", reasoningCharacters: 2400, finishReason: "length", completionTokens: 500, textField: "missing" });
+    expect(emptyProviderResponseMessage("openai-compatible", evidence, 500))
+      .toBe("OpenAI-compatible reached the 500-token output limit after 500 completion tokens without producing a final answer (2400 reasoning characters were returned). The response was not scored.");
+  });
+
+  it("captures safe response metadata for Ollama, Anthropic, and Gemini", () => {
+    expect(parseOllamaResponseEvidence({ message: { content: "Done", thinking: "private" }, done_reason: "stop", eval_count: 4 }))
+      .toMatchObject({ text: "Done", reasoningCharacters: 7, finishReason: "stop", completionTokens: 4 });
+    expect(parseAnthropicResponseEvidence({ content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "Done" }], stop_reason: "end_turn" }))
+      .toMatchObject({ text: "Done", reasoningCharacters: 7, finishReason: "end_turn" });
+    expect(parseGeminiResponseEvidence({ candidates: [{ finishReason: "STOP", content: { parts: [{ thought: true, text: "private" }, { text: "Done" }] } }] }))
+      .toMatchObject({ text: "Done", reasoningCharacters: 7, finishReason: "STOP" });
+  });
+
+  it("reports a successful but unrecognized response shape without inventing content", () => {
+    const evidence = parseOpenAiResponseEvidence({ choices: [{ finish_reason: "stop", message: {} }] });
+    expect(emptyProviderResponseMessage("openai-compatible", evidence, 500))
+      .toBe("OpenAI-compatible returned HTTP 200 but no final text in a recognized response field (finish reason: stop; text field: missing). The response was not scored.");
   });
 });
 

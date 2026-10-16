@@ -232,6 +232,161 @@ export async function testConnection(connection: Connection, secretOverride?: st
   }
 }
 
+export type ProviderResponseEvidence = ProviderResponse & {
+  reasoningCharacters: number;
+  finishReason: string | null;
+  toolCallCount: number;
+  textField: string;
+};
+
+function responseText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .filter((part) => !part || typeof part !== "object" || !["reasoning", "thinking"].includes(String((part as JsonRecord).type ?? "").toLowerCase()))
+    .map((part) => part && typeof part === "object" && typeof (part as JsonRecord).text === "string" ? (part as JsonRecord).text : "")
+    .join("");
+}
+
+function reasoningText(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value) return value;
+    if (Array.isArray(value)) {
+      const text = value
+        .filter((part) => part && typeof part === "object" && ["reasoning", "thinking"].includes(String((part as JsonRecord).type ?? "").toLowerCase()))
+        .map((part) => typeof (part as JsonRecord).text === "string" ? (part as JsonRecord).text : "")
+        .join("");
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+function finishReason(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+export function parseOllamaResponseEvidence(data: JsonRecord): ProviderResponseEvidence {
+  const message = data.message ?? {};
+  return {
+    text: responseText(message.content),
+    promptTokens: typeof data.prompt_eval_count === "number" ? data.prompt_eval_count : undefined,
+    completionTokens: typeof data.eval_count === "number" ? data.eval_count : undefined,
+    reasoningCharacters: reasoningText(message.thinking, message.reasoning).length,
+    finishReason: finishReason(data.done_reason),
+    toolCallCount: Array.isArray(message.tool_calls) ? message.tool_calls.length : 0,
+    textField: typeof message.content === "string" || Array.isArray(message.content) ? "message.content" : "missing"
+  };
+}
+
+export function parseOpenAiResponseEvidence(data: JsonRecord): ProviderResponseEvidence {
+  const choice = data.choices?.[0] ?? {};
+  const message = choice.message ?? {};
+  const content = responseText(message.content);
+  const refusal = typeof message.refusal === "string" ? message.refusal : "";
+  const legacyText = typeof choice.text === "string" ? choice.text : "";
+  const text = content || refusal || legacyText;
+  return {
+    text,
+    promptTokens: typeof data.usage?.prompt_tokens === "number" ? data.usage.prompt_tokens : undefined,
+    completionTokens: typeof data.usage?.completion_tokens === "number" ? data.usage.completion_tokens : undefined,
+    reasoningCharacters: reasoningText(message.reasoning_content, message.reasoning, message.analysis, Array.isArray(message.content) ? message.content : undefined).length,
+    finishReason: finishReason(choice.finish_reason),
+    toolCallCount: Array.isArray(message.tool_calls) ? message.tool_calls.length : 0,
+    textField: content ? "choices[0].message.content" : refusal ? "choices[0].message.refusal" : legacyText ? "choices[0].text" : "missing"
+  };
+}
+
+export function parseAnthropicResponseEvidence(data: JsonRecord): ProviderResponseEvidence {
+  const parts = Array.isArray(data.content) ? data.content : [];
+  const text = parts.filter((part: JsonRecord) => part.type === "text").map((part: JsonRecord) => String(part.text ?? "")).join("\n");
+  const reasoning = parts.filter((part: JsonRecord) => part.type === "thinking" || part.type === "reasoning").map((part: JsonRecord) => String(part.thinking ?? part.text ?? "")).join("");
+  return {
+    text,
+    promptTokens: typeof data.usage?.input_tokens === "number" ? data.usage.input_tokens : undefined,
+    completionTokens: typeof data.usage?.output_tokens === "number" ? data.usage.output_tokens : undefined,
+    reasoningCharacters: reasoning.length,
+    finishReason: finishReason(data.stop_reason),
+    toolCallCount: parts.filter((part: JsonRecord) => part.type === "tool_use").length,
+    textField: text ? "content[type=text]" : "missing"
+  };
+}
+
+export function parseGeminiResponseEvidence(data: JsonRecord): ProviderResponseEvidence {
+  const candidate = data.candidates?.[0] ?? {};
+  const parts = Array.isArray(candidate.content?.parts) ? candidate.content.parts : [];
+  const text = parts.filter((part: JsonRecord) => typeof part.text === "string" && part.thought !== true).map((part: JsonRecord) => part.text).join("");
+  const reasoning = parts.filter((part: JsonRecord) => typeof part.text === "string" && part.thought === true).map((part: JsonRecord) => part.text).join("");
+  return {
+    text,
+    promptTokens: typeof data.usageMetadata?.promptTokenCount === "number" ? data.usageMetadata.promptTokenCount : undefined,
+    completionTokens: typeof data.usageMetadata?.candidatesTokenCount === "number" ? data.usageMetadata.candidatesTokenCount : undefined,
+    reasoningCharacters: reasoning.length,
+    finishReason: finishReason(candidate.finishReason),
+    toolCallCount: parts.filter((part: JsonRecord) => part.functionCall).length,
+    textField: text ? "candidates[0].content.parts[].text" : "missing"
+  };
+}
+
+export function providerResponseDiagnosticDetails(
+  provider: Connection["provider"],
+  model: string,
+  requestedMaxTokens: number,
+  evidence: ProviderResponseEvidence,
+  responseMode: "text" | "agent"
+): Record<string, string | number | null | undefined> {
+  return {
+    provider,
+    model,
+    responseMode,
+    contentCharacters: evidence.text.length,
+    reasoningCharacters: evidence.reasoningCharacters,
+    finishReason: evidence.finishReason,
+    promptTokens: evidence.promptTokens,
+    completionTokens: evidence.completionTokens,
+    requestedMaxTokens,
+    toolCallCount: evidence.toolCallCount,
+    textField: evidence.textField
+  };
+}
+
+function logProviderResponse(
+  connection: Connection,
+  model: string,
+  requestedMaxTokens: number,
+  evidence: ProviderResponseEvidence,
+  responseMode: "text" | "agent"
+): void {
+  diagnosticLog("info", "provider.response", providerResponseDiagnosticDetails(connection.provider, model, requestedMaxTokens, evidence, responseMode));
+}
+
+export function emptyProviderResponseMessage(
+  provider: Connection["provider"],
+  evidence: Pick<ProviderResponseEvidence, "reasoningCharacters" | "finishReason" | "completionTokens" | "toolCallCount" | "textField">,
+  requestedMaxTokens: number
+): string {
+  const name = providerLabel(provider);
+  const reason = evidence.finishReason ?? "unknown";
+  const tokenSummary = evidence.completionTokens === undefined ? "" : ` after ${evidence.completionTokens} completion tokens`;
+  if (evidence.finishReason?.toLowerCase() === "length") {
+    return `${name} reached the ${requestedMaxTokens}-token output limit${tokenSummary} without producing a final answer${evidence.reasoningCharacters ? ` (${evidence.reasoningCharacters} reasoning characters were returned)` : ""}. The response was not scored.`;
+  }
+  if (evidence.reasoningCharacters) {
+    return `${name} returned ${evidence.reasoningCharacters} characters of reasoning but no final answer (finish reason: ${reason}${tokenSummary}). The response was not scored.`;
+  }
+  if (evidence.toolCallCount) {
+    return `${name} returned ${evidence.toolCallCount} tool call${evidence.toolCallCount === 1 ? "" : "s"} but no final text for this text-only evaluation (finish reason: ${reason}). The response was not scored.`;
+  }
+  return `${name} returned HTTP 200 but no final text in a recognized response field (finish reason: ${reason}; text field: ${evidence.textField}). The response was not scored.`;
+}
+
+function finalizeTextResponse(connection: Connection, options: RequestOptions, evidence: ProviderResponseEvidence): ProviderResponse {
+  const requestedMaxTokens = options.maxTokens ?? 500;
+  logProviderResponse(connection, options.model, requestedMaxTokens, evidence, "text");
+  if (!evidence.text.trim()) throw new Error(emptyProviderResponseMessage(connection.provider, evidence, requestedMaxTokens));
+  return { text: evidence.text, promptTokens: evidence.promptTokens, completionTokens: evidence.completionTokens };
+}
+
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
   if (connection.provider === "ollama") {
     const data = (await request(connection, "/api/chat", {
@@ -249,26 +404,7 @@ export async function generateResponse(connection: Connection, options: RequestO
         }
       })
     })) as JsonRecord;
-    const text = typeof data.message?.content === "string" ? data.message.content : "";
-    const thinking = typeof data.message?.thinking === "string" ? data.message.thinking : "";
-    diagnosticLog("info", "ollama.response", {
-      model: options.model,
-      contentCharacters: text.length,
-      thinkingCharacters: thinking.length,
-      doneReason: typeof data.done_reason === "string" ? data.done_reason : null,
-      generatedTokens: typeof data.eval_count === "number" ? data.eval_count : null
-    });
-    if (!text.trim()) {
-      if (thinking) {
-        throw new Error(`Ollama returned ${thinking.length} characters of reasoning but no final answer (finish reason: ${data.done_reason ?? "unknown"}). The response was not scored.`);
-      }
-      throw new Error(`Ollama returned an empty final answer (finish reason: ${data.done_reason ?? "unknown"}). The response was not scored.`);
-    }
-    return {
-      text,
-      promptTokens: data.prompt_eval_count,
-      completionTokens: data.eval_count
-    };
+    return finalizeTextResponse(connection, options, parseOllamaResponseEvidence(data));
   }
 
   if (connection.provider === "anthropic") {
@@ -285,11 +421,7 @@ export async function generateResponse(connection: Connection, options: RequestO
         max_tokens: options.maxTokens ?? 500
       })
     })) as JsonRecord;
-    return {
-      text: (data.content ?? []).filter((part: JsonRecord) => part.type === "text").map((part: JsonRecord) => part.text).join("\n"),
-      promptTokens: data.usage?.input_tokens,
-      completionTokens: data.usage?.output_tokens
-    };
+    return finalizeTextResponse(connection, options, parseAnthropicResponseEvidence(data));
   }
 
   if (connection.provider === "gemini") {
@@ -315,11 +447,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       }
     );
     const data = (await readJson(response)) as JsonRecord;
-    return {
-      text: data.candidates?.[0]?.content?.parts?.map((part: JsonRecord) => part.text ?? "").join("") ?? "",
-      promptTokens: data.usageMetadata?.promptTokenCount,
-      completionTokens: data.usageMetadata?.candidatesTokenCount
-    };
+    return finalizeTextResponse(connection, options, parseGeminiResponseEvidence(data));
   }
 
   if (connection.provider === "kie") {
@@ -343,11 +471,7 @@ export async function generateResponse(connection: Connection, options: RequestO
           stream: false
         })
       })) as JsonRecord;
-      return {
-        text: (data.content ?? []).filter((part: JsonRecord) => part.type === "text").map((part: JsonRecord) => part.text).join("\n"),
-        promptTokens: data.usage?.input_tokens,
-        completionTokens: data.usage?.output_tokens
-      };
+      return finalizeTextResponse(connection, options, parseAnthropicResponseEvidence(data));
     }
 
     const data = (await request(connection, selected.endpoint, {
@@ -360,11 +484,7 @@ export async function generateResponse(connection: Connection, options: RequestO
         stream: false
       })
     })) as JsonRecord;
-    return {
-      text: data.choices?.[0]?.message?.content ?? "",
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens
-    };
+    return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
   }
 
   const data = (await request(connection, "/v1/chat/completions", {
@@ -380,11 +500,7 @@ export async function generateResponse(connection: Connection, options: RequestO
     })
   })) as JsonRecord;
 
-  return {
-    text: data.choices?.[0]?.message?.content ?? "",
-    promptTokens: data.usage?.prompt_tokens,
-    completionTokens: data.usage?.completion_tokens
-  };
+  return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
 }
 
 export type AgentToolDefinition = {
@@ -504,6 +620,20 @@ function geminiContents(messages: AgentConversationMessage[]): JsonRecord[] {
   });
 }
 
+function finalizeAgentResponse(
+  connection: Connection,
+  options: { model: string; maxTokens?: number },
+  turn: AgentProviderTurn,
+  evidence: ProviderResponseEvidence
+): AgentProviderTurn {
+  const requestedMaxTokens = options.maxTokens ?? 800;
+  logProviderResponse(connection, options.model, requestedMaxTokens, { ...evidence, text: turn.text, toolCallCount: turn.toolCalls.length }, "agent");
+  if (!turn.text.trim() && !turn.toolCalls.length) {
+    throw new Error(emptyProviderResponseMessage(connection.provider, evidence, requestedMaxTokens));
+  }
+  return turn;
+}
+
 /** Runs one model turn with declarative tools. Tool execution remains in the local runner. */
 export async function generateAgentTurn(
   connection: Connection,
@@ -540,7 +670,7 @@ export async function generateAgentTurn(
         options: { temperature: options.temperature ?? 0, num_predict: options.maxTokens ?? 800 }
       })
     }) as JsonRecord;
-    return parseOpenAiAgentTurn(data);
+    return finalizeAgentResponse(connection, options, parseOpenAiAgentTurn(data), parseOllamaResponseEvidence(data));
   }
 
   if (connection.provider === "anthropic" || (connection.provider === "kie" && KIE_MODELS.find((model) => model.id === options.model)?.protocol === "anthropic")) {
@@ -560,7 +690,7 @@ export async function generateAgentTurn(
         stream: false
       })
     }) as JsonRecord;
-    return parseAnthropicAgentTurn(data);
+    return finalizeAgentResponse(connection, options, parseAnthropicAgentTurn(data), parseAnthropicResponseEvidence(data));
   }
 
   if (connection.provider === "gemini") {
@@ -581,8 +711,8 @@ export async function generateAgentTurn(
     );
     const data = await readJson(response) as JsonRecord;
     const parts = data.candidates?.[0]?.content?.parts ?? [];
-    return {
-      text: parts.filter((part: JsonRecord) => typeof part.text === "string").map((part: JsonRecord) => part.text).join(""),
+    const turn = {
+      text: parts.filter((part: JsonRecord) => typeof part.text === "string" && part.thought !== true).map((part: JsonRecord) => part.text).join(""),
       toolCalls: parts.filter((part: JsonRecord) => part.functionCall).map((part: JsonRecord) => ({
         id: String(part.functionCall.id ?? crypto.randomUUID()),
         name: String(part.functionCall.name ?? ""),
@@ -591,6 +721,7 @@ export async function generateAgentTurn(
       promptTokens: data.usageMetadata?.promptTokenCount,
       completionTokens: data.usageMetadata?.candidatesTokenCount
     };
+    return finalizeAgentResponse(connection, options, turn, parseGeminiResponseEvidence(data));
   }
 
   const selectedKie = connection.provider === "kie" ? KIE_MODELS.find((model) => model.id === options.model) : undefined;
@@ -608,7 +739,7 @@ export async function generateAgentTurn(
       stream: false
     })
   }) as JsonRecord;
-  return parseOpenAiAgentTurn(data);
+  return finalizeAgentResponse(connection, options, parseOpenAiAgentTurn(data), parseOpenAiResponseEvidence(data));
 }
 
 export function providerLabel(provider: Connection["provider"]): string {
