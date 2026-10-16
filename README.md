@@ -2,6 +2,8 @@
 
 **AI4H Eval Lab** is a local-first desktop application for transparent, reproducible language-model safety evaluations. It is an open-source project of the [Safe AI for Humanity Foundation](https://ai-4-h.org/).
 
+[![Donate via Givebutter](https://img.shields.io/badge/Donate-Givebutter-FA8C16?style=flat-square)](https://givebutter.com/support-safe-ai-for-humanity-30j2lu)
+
 The app runs on macOS and Linux, connects to local Ollama models and hosted LLM APIs, downloads versioned community test catalogs, and keeps evaluation evidence on the user's device.
 
 ## App preview
