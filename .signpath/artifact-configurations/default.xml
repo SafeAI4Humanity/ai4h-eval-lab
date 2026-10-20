@@ -1,0 +1,18 @@
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <msi-file subject="AI4H Eval Lab" author="Safe AI for Humanity Foundation">
+      <pe-file-set product-name="AI4H Eval Lab" product-version="${version}" file-version="${version}"
+                   company-name="Safe AI for Humanity Foundation"
+                   copyright="Copyright © 2026 Safe AI for Humanity Foundation">
+        <include path="*.exe" min-matches="1" max-matches="unbounded" />
+        <for-each>
+          <authenticode-sign />
+        </for-each>
+      </pe-file-set>
+      <authenticode-sign />
+    </msi-file>
+  </zip-file>
+</artifact-configuration>

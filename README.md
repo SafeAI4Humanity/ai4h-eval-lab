@@ -93,6 +93,16 @@ Automatic checks are evidence indicators, not a universal model-safety score. Re
 
 AI4H Eval Lab does not upload results or collect product analytics. Prompts selected for a remote provider necessarily leave the device and are subject to that provider's terms. Ollama runs may remain fully local. See [SECURITY.md](SECURITY.md).
 
+## Code signing policy
+
+Windows installers are code-signed. Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- **Committers and reviewers:** [SafeAI4Humanity members](https://github.com/orgs/SafeAI4Humanity/people)
+- **Approvers:** [SafeAI4Humanity owners](https://github.com/orgs/SafeAI4Humanity/people?query=role%3Aowner)
+- **Privacy policy:** see [Privacy](#privacy) above — the app does not transfer any information to other networked systems unless the user explicitly configures a remote provider.
+
+Signed binaries are built from this repository on GitHub-hosted runners and submitted to SignPath for origin verification and manual approval before release.
+
 ## Support this work
 
 AI4H Eval Lab is an open-source project of the Safe AI for Humanity Foundation, an IRS-recognized **Non-Profit · 501(c)(3)** organization. Financial contributions are tax-deductible to the extent permitted by law. [Make a financial contribution](https://ai-4-h.org/#donate) to support independent AI safety research, public evaluation suites, and freely available tools.
