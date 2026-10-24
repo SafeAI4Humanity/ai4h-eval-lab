@@ -108,6 +108,25 @@ export function ollamaThinkingSetting(model: string): false | "low" {
   return model.toLocaleLowerCase().includes("gpt-oss") ? "low" : false;
 }
 
+const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
+
+function isReasoningModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return REASONING_MODEL_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+export function openAiCompatibleThinkingSetting(model: string): Record<string, unknown> {
+  if (!isReasoningModel(model)) return {};
+  const setting = ollamaThinkingSetting(model);
+  if (setting === false) return { chat_template_kwargs: { enable_thinking: false } };
+  return { reasoning: { effort: setting } };
+}
+
+export function openAiCompatibleMaxTokens(model: string, requested: number | undefined): number {
+  const base = requested ?? 500;
+  return isReasoningModel(model) ? Math.max(base, 1000) : base;
+}
+
 async function request(
   connection: Connection,
   path: string,
@@ -487,6 +506,7 @@ export async function generateResponse(connection: Connection, options: RequestO
     return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
   }
 
+  const maxTokens = openAiCompatibleMaxTokens(options.model, options.maxTokens);
   const data = (await request(connection, "/v1/chat/completions", {
     method: "POST",
     signal: options.signal,
@@ -494,13 +514,14 @@ export async function generateResponse(connection: Connection, options: RequestO
       model: options.model,
       messages: options.messages,
       temperature: options.temperature ?? 0,
-      max_tokens: options.maxTokens ?? 500,
+      max_tokens: maxTokens,
       stream: false,
-      ...(options.seed === undefined ? {} : { seed: options.seed })
+      ...(options.seed === undefined ? {} : { seed: options.seed }),
+      ...openAiCompatibleThinkingSetting(options.model)
     })
   })) as JsonRecord;
 
-  return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
+  return finalizeTextResponse(connection, { ...options, maxTokens }, parseOpenAiResponseEvidence(data));
 }
 
 export type AgentToolDefinition = {

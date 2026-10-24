@@ -5,6 +5,8 @@ import {
   kieModelIds,
   normalizeProviderBaseUrl,
   ollamaThinkingSetting,
+  openAiCompatibleMaxTokens,
+  openAiCompatibleThinkingSetting,
   parseAnthropicAgentTurn,
   parseAnthropicResponseEvidence,
   parseGeminiResponseEvidence,
@@ -117,6 +119,32 @@ describe("ollamaThinkingSetting", () => {
 
   it("uses the lowest supported reasoning level for GPT-OSS", () => {
     expect(ollamaThinkingSetting("gpt-oss:latest")).toBe("low");
+  });
+});
+
+describe("openAiCompatibleThinkingSetting", () => {
+  it("disables thinking for reasoning models so the output budget reaches a final answer", () => {
+    expect(openAiCompatibleThinkingSetting("qwen3.8:latest")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+    expect(openAiCompatibleThinkingSetting("deepseek-r1:latest")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
+    expect(openAiCompatibleThinkingSetting("gpt-oss:latest")).toEqual({ reasoning: { effort: "low" } });
+  });
+
+  it("sends no thinking setting for non-reasoning models", () => {
+    expect(openAiCompatibleThinkingSetting("gpt-5-2")).toEqual({});
+    expect(openAiCompatibleThinkingSetting("gemini-3-pro")).toEqual({});
+  });
+});
+
+describe("openAiCompatibleMaxTokens", () => {
+  it("keeps a floor for reasoning models whose servers ignore the thinking setting", () => {
+    expect(openAiCompatibleMaxTokens("qwen3.8:latest", 300)).toBe(1000);
+    expect(openAiCompatibleMaxTokens("qwen3.8:latest", 2000)).toBe(2000);
+    expect(openAiCompatibleMaxTokens("qwen3.8:latest", undefined)).toBe(1000);
+  });
+
+  it("leaves budgets unchanged for non-reasoning models", () => {
+    expect(openAiCompatibleMaxTokens("gpt-5-2", 300)).toBe(300);
+    expect(openAiCompatibleMaxTokens("gpt-5-2", undefined)).toBe(500);
   });
 });
 
