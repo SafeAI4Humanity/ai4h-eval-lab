@@ -123,10 +123,11 @@ describe("ollamaThinkingSetting", () => {
 });
 
 describe("openAiCompatibleThinkingSetting", () => {
-  it("disables thinking for reasoning models so the output budget reaches a final answer", () => {
-    expect(openAiCompatibleThinkingSetting("qwen3.8:latest")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
-    expect(openAiCompatibleThinkingSetting("deepseek-r1:latest")).toEqual({ chat_template_kwargs: { enable_thinking: false } });
-    expect(openAiCompatibleThinkingSetting("gpt-oss:latest")).toEqual({ reasoning: { effort: "low" } });
+  it("sends both backend variants so any compatible server can disable thinking", () => {
+    const expected = { chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "none" };
+    expect(openAiCompatibleThinkingSetting("qwen3.8:latest")).toEqual(expected);
+    expect(openAiCompatibleThinkingSetting("deepseek-r1:latest")).toEqual(expected);
+    expect(openAiCompatibleThinkingSetting("gpt-oss:latest")).toEqual(expected);
   });
 
   it("sends no thinking setting for non-reasoning models", () => {

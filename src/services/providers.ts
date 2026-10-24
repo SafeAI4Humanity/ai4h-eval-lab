@@ -117,9 +117,9 @@ function isReasoningModel(model: string): boolean {
 
 export function openAiCompatibleThinkingSetting(model: string): Record<string, unknown> {
   if (!isReasoningModel(model)) return {};
-  const setting = ollamaThinkingSetting(model);
-  if (setting === false) return { chat_template_kwargs: { enable_thinking: false } };
-  return { reasoning: { effort: setting } };
+  // Ollama's /v1 honors reasoning_effort ("none" disables thinking, including for GPT-OSS);
+  // vLLM and LM Studio honor chat_template_kwargs. Servers ignore fields they do not support.
+  return { chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "none" };
 }
 
 export function openAiCompatibleMaxTokens(model: string, requested: number | undefined): number {
