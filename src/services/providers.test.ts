@@ -137,14 +137,14 @@ describe("openAiCompatibleThinkingSetting", () => {
 });
 
 describe("openAiCompatibleMaxTokens", () => {
-  it("keeps a floor for reasoning models whose servers ignore the thinking setting", () => {
-    expect(openAiCompatibleMaxTokens("qwen3.8:latest", 300)).toBe(1000);
+  it("honors an explicit suite request", () => {
+    expect(openAiCompatibleMaxTokens("qwen3.8:latest", 300)).toBe(300);
     expect(openAiCompatibleMaxTokens("qwen3.8:latest", 2000)).toBe(2000);
-    expect(openAiCompatibleMaxTokens("qwen3.8:latest", undefined)).toBe(1000);
+    expect(openAiCompatibleMaxTokens("gpt-5-2", 300)).toBe(300);
   });
 
-  it("leaves budgets unchanged for non-reasoning models", () => {
-    expect(openAiCompatibleMaxTokens("gpt-5-2", 300)).toBe(300);
+  it("applies the larger fallback only when the suite declares no budget", () => {
+    expect(openAiCompatibleMaxTokens("qwen3.8:latest", undefined)).toBe(1000);
     expect(openAiCompatibleMaxTokens("gpt-5-2", undefined)).toBe(500);
   });
 });

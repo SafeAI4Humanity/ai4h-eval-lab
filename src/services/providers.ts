@@ -123,8 +123,8 @@ export function openAiCompatibleThinkingSetting(model: string): Record<string, u
 }
 
 export function openAiCompatibleMaxTokens(model: string, requested: number | undefined): number {
-  const base = requested ?? 500;
-  return isReasoningModel(model) ? Math.max(base, 1000) : base;
+  if (requested !== undefined) return requested;
+  return isReasoningModel(model) ? 1000 : 500;
 }
 
 async function request(
