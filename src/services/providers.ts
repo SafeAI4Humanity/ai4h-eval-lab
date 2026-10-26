@@ -141,6 +141,8 @@ export function supportedReasoningEfforts(provider: ProviderKind, model: string)
   // values differ by family: o1 is low/high only, o3+ adds medium, GPT-5 adds minimal.
   if (/(^|\/)o1/.test(lower)) return ["low", "high"];
   if (/(^|\/)o[3-9]/.test(lower)) return ["low", "medium", "high"];
+  if (lower.includes("gpt-5-pro")) return ["high"]; // Pro models run at a fixed effort
+  if (lower.includes("gpt-5.1") || lower.includes("gpt-5-1")) return ["none", "low", "medium", "high"];
   if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
   if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
   return [];
@@ -542,6 +544,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       signal: options.signal,
       body: JSON.stringify({
         messages: options.messages,
+        ...(effort === undefined ? {} : { reasoning_effort: effort }),
         temperature: options.temperature ?? 0,
         max_tokens: options.maxTokens ?? 500,
         stream: false

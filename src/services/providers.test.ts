@@ -163,6 +163,8 @@ describe("supportedReasoningEfforts", () => {
     expect(supportedReasoningEfforts("openai", "o3")).toEqual(["low", "medium", "high"]);
     expect(supportedReasoningEfforts("openai", "o4-mini")).toEqual(["low", "medium", "high"]);
     expect(supportedReasoningEfforts("openai", "gpt-5")).toEqual(["minimal", "low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openai", "gpt-5.1")).toEqual(["none", "low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openai", "gpt-5-pro")).toEqual(["high"]);
     expect(supportedReasoningEfforts("openrouter", "openai/o3")).toEqual(["low", "medium", "high"]);
   });
 });
