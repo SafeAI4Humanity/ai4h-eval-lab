@@ -104,12 +104,19 @@ export function normalizeProviderBaseUrl(provider: Connection["provider"], value
   return normalized;
 }
 
-export function resolveReasoningEffort(connection: Connection): string | undefined {
-  return connection.reasoningEffort;
+export function resolveReasoningEffort(connection: Connection, model: string): string | undefined {
+  const effort = connection.reasoningEffort;
+  if (effort === undefined) return undefined;
+  const supported = supportedReasoningEfforts(connection.provider, model);
+  if (!supported.length) return undefined; // model advertises no thinking control
+  if (!supported.includes(effort)) {
+    throw new Error(`Reasoning effort "${effort}" is not supported by ${model} on this connection (supported: ${supported.join(", ")}).`);
+  }
+  return effort;
 }
 
 export function ollamaThinkValue(effort: string): unknown {
-  return effort === "none" ? false : effort;
+  return effort === "none" ? false : effort === "on" ? true : effort;
 }
 
 const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
@@ -433,7 +440,7 @@ function finalizeTextResponse(connection: Connection, options: RequestOptions, e
 }
 
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
-  const effort = resolveReasoningEffort(connection);
+  const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
     const data = (await request(connection, "/api/chat", {
       method: "POST",
@@ -694,7 +701,7 @@ export async function generateAgentTurn(
     signal?: AbortSignal;
   }
 ): Promise<AgentProviderTurn> {
-  const effort = resolveReasoningEffort(connection);
+  const effort = resolveReasoningEffort(connection, options.model);
   const system = options.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
 
   if (connection.provider === "ollama") {
@@ -783,6 +790,7 @@ export async function generateAgentTurn(
       messages: openAiMessages(options.messages),
       tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
       tool_choice: "auto",
+      ...(effort === undefined ? {} : { reasoning_effort: effort }),
       temperature: options.temperature ?? 0,
       max_tokens: options.maxTokens ?? 800,
       stream: false

@@ -118,17 +118,27 @@ describe("resolveReasoningEffort", () => {
   const connection = { id: "c1", name: "c1", provider: "ollama", baseUrl: "http://localhost:11434", enabled: true } satisfies Connection;
 
   it("uses the connection setting when set", () => {
-    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" })).toBe("low");
+    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" }, "qwen3.8:latest")).toBe("low");
   });
 
   it("returns undefined when unset so the model default applies", () => {
-    expect(resolveReasoningEffort(connection)).toBeUndefined();
+    expect(resolveReasoningEffort(connection, "qwen3.8:latest")).toBeUndefined();
+  });
+
+  it("returns undefined for models with no thinking control", () => {
+    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" }, "gpt-5-2")).toBeUndefined();
+  });
+
+  it("rejects an effort the target model does not support", () => {
+    expect(() => resolveReasoningEffort({ ...connection, reasoningEffort: "none" }, "gpt-oss:120b")).not.toThrow(); // ollama accepts none
+    expect(() => resolveReasoningEffort({ id: "c2", name: "c2", provider: "openai-compatible", baseUrl: "http://localhost:8000", enabled: true, reasoningEffort: "none" } satisfies Connection, "gpt-oss:120b")).toThrow(/not supported by gpt-oss:120b/);
   });
 });
 
 describe("ollamaThinkValue", () => {
-  it("maps none to false and passes effort strings through", () => {
+  it("maps none to false, on to true, and passes effort strings through", () => {
     expect(ollamaThinkValue("none")).toBe(false);
+    expect(ollamaThinkValue("on")).toBe(true);
     expect(ollamaThinkValue("low")).toBe("low");
   });
 });

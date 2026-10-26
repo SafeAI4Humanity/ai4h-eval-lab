@@ -19,6 +19,7 @@ export type SubmissionSchemaVersion = 1 | 2 | 3;
 export type PublishedTarget = {
   provider: ProviderKind;
   model: string;
+  reasoningEffort?: string;
 };
 
 export type PublishedReview =
@@ -229,7 +230,7 @@ export function buildEvaluationSubmission(
       completedAt: run.completedAt as string,
       status: "completed",
       suiteSnapshots,
-      targets: run.targets.map((target) => ({ provider: target.provider, model: target.model })),
+      targets: run.targets.map((target) => ({ provider: target.provider, model: target.model, ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}) })),
       results: run.results.map((result) => publishResult(result, schemaVersion))
     }
   };

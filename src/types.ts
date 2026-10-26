@@ -152,6 +152,7 @@ export type RunTarget = {
   provider: ProviderKind;
   connectionName: string;
   model: string;
+  reasoningEffort?: string;
 };
 
 export type EvaluationOutcome = {

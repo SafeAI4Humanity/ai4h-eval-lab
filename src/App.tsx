@@ -998,7 +998,8 @@ export function NewEvaluation({ suites, connections, onStart, onConnections, ini
         connectionId: connection.id,
         provider: connection.provider,
         connectionName: connection.name,
-        model: target.model.trim()
+        model: target.model.trim(),
+        ...(connection.reasoningEffort ? { reasoningEffort: connection.reasoningEffort } : {})
       };
     });
     if (selectedSuites.length && runTargets.length && runTargets.every((target) => target.model)) void onStart(name, selectedSuites, runTargets);
