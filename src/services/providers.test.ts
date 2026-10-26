@@ -126,7 +126,11 @@ describe("resolveReasoningEffort", () => {
   });
 
   it("returns undefined for models with no thinking control", () => {
-    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" }, "gpt-4o")).toBeUndefined();
+    expect(resolveReasoningEffort({ ...connection, provider: "openai-compatible", reasoningEffort: "low" }, "gpt-4o")).toBeUndefined();
+  });
+
+  it("accepts scan-normalized boolean values for Ollama (the scan is authoritative)", () => {
+    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "on" }, "qwen3.8:latest")).toBe("on");
   });
 
   it("rejects an effort the target model does not support", () => {

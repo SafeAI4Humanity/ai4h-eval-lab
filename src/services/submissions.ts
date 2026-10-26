@@ -161,7 +161,7 @@ function publishResult(result: CaseResult, schemaVersion: SubmissionSchemaVersio
     caseId: result.caseId,
     caseTitle: result.caseTitle,
     caseMessages: result.caseMessages as NonNullable<CaseResult["caseMessages"]>,
-    target: { provider: result.target.provider, model: result.target.model },
+    target: { provider: result.target.provider, model: result.target.model, ...(result.target.reasoningEffort ? { reasoningEffort: result.target.reasoningEffort } : {}) },
     response: result.response,
     startedAt: result.startedAt,
     completedAt: result.completedAt,

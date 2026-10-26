@@ -107,6 +107,10 @@ export function normalizeProviderBaseUrl(provider: Connection["provider"], value
 export function resolveReasoningEffort(connection: Connection, model: string): string | undefined {
   const effort = connection.reasoningEffort;
   if (effort === undefined) return undefined;
+  // For Ollama the /api/show scan is authoritative: boolean controls normalize to
+  // "on"/"none", which the static level list would otherwise reject before
+  // ollamaThinkValue can convert them back.
+  if (connection.provider === "ollama") return effort;
   const supported = supportedReasoningEfforts(connection.provider, model);
   if (!supported.length) return undefined; // model advertises no thinking control
   if (!supported.includes(effort)) {
