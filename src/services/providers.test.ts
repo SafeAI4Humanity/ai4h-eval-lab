@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import type { Connection } from "../types";
 import {
   assertKieCreditResponse,
   emptyProviderResponseMessage,
   kieModelIds,
   normalizeProviderBaseUrl,
-  ollamaThinkingSetting,
+  ollamaThinkValue,
   openAiCompatibleMaxTokens,
-  openAiCompatibleThinkingSetting,
+  parseOllamaShowThinking,
+  resolveReasoningEffort,
+  supportedReasoningEfforts,
   parseAnthropicAgentTurn,
   parseAnthropicResponseEvidence,
   parseGeminiResponseEvidence,
@@ -111,28 +114,49 @@ describe("normalizeProviderBaseUrl", () => {
   });
 });
 
-describe("ollamaThinkingSetting", () => {
-  it("disables thinking so evaluation token limits produce a final answer", () => {
-    expect(ollamaThinkingSetting("qwen3.6:custom")).toBe(false);
-    expect(ollamaThinkingSetting("deepseek-r1:latest")).toBe(false);
+describe("resolveReasoningEffort", () => {
+  const connection = { id: "c1", name: "c1", provider: "ollama", baseUrl: "http://localhost:11434", enabled: true } satisfies Connection;
+
+  it("uses the connection setting when set", () => {
+    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" })).toBe("low");
   });
 
-  it("uses the lowest supported reasoning level for GPT-OSS", () => {
-    expect(ollamaThinkingSetting("gpt-oss:latest")).toBe("low");
+  it("returns undefined when unset so the model default applies", () => {
+    expect(resolveReasoningEffort(connection)).toBeUndefined();
   });
 });
 
-describe("openAiCompatibleThinkingSetting", () => {
-  it("sends both backend variants so any compatible server can disable thinking", () => {
-    const expected = { chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "none" };
-    expect(openAiCompatibleThinkingSetting("qwen3.8:latest")).toEqual(expected);
-    expect(openAiCompatibleThinkingSetting("deepseek-r1:latest")).toEqual(expected);
-    expect(openAiCompatibleThinkingSetting("gpt-oss:latest")).toEqual(expected);
+describe("ollamaThinkValue", () => {
+  it("maps none to false and passes effort strings through", () => {
+    expect(ollamaThinkValue("none")).toBe(false);
+    expect(ollamaThinkValue("low")).toBe("low");
+  });
+});
+
+describe("supportedReasoningEfforts", () => {
+  it("excludes none for GPT-OSS on generic OpenAI-compatible backends (vLLM Harmony rejects it)", () => {
+    expect(supportedReasoningEfforts("openai-compatible", "gpt-oss:120b")).toEqual(["low", "medium", "high"]);
+    expect(supportedReasoningEfforts("ollama", "gpt-oss:120b")).toEqual(["none", "low", "medium", "high"]);
   });
 
-  it("sends no thinking setting for non-reasoning models", () => {
-    expect(openAiCompatibleThinkingSetting("gpt-5-2")).toEqual({});
-    expect(openAiCompatibleThinkingSetting("gemini-3-pro")).toEqual({});
+  it("offers levels for other reasoning models and nothing for non-reasoning models", () => {
+    expect(supportedReasoningEfforts("openai-compatible", "qwen3.8:latest")).toEqual(["none", "low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openai-compatible", "gpt-5-2")).toEqual([]);
+  });
+});
+
+describe("parseOllamaShowThinking", () => {
+  it("maps boolean thinking values to none/on", () => {
+    expect(parseOllamaShowThinking({ thinking: { values: [false, true], default: true } })).toEqual({ values: ["none", "on"], default: "on" });
+  });
+
+  it("passes string effort values through", () => {
+    expect(parseOllamaShowThinking({ thinking: { values: ["none", "low", "medium", "high"], default: "high" } })).toEqual({ values: ["none", "low", "medium", "high"], default: "high" });
+  });
+
+  it("returns null for models without thinking metadata", () => {
+    expect(parseOllamaShowThinking({ capabilities: ["completion"] })).toBeNull();
+    expect(parseOllamaShowThinking({})).toBeNull();
   });
 });
 

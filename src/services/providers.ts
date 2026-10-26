@@ -1,4 +1,4 @@
-import type { ChatMessage, Connection, ProviderResponse } from "../types";
+import type { ChatMessage, Connection, ProviderKind, ProviderResponse } from "../types";
 import { appFetch, normalizeBaseUrl, readJson } from "./http";
 import { getSecret } from "./storage";
 import { diagnosticLog, redactDiagnosticUrl } from "./diagnostics";
@@ -104,8 +104,12 @@ export function normalizeProviderBaseUrl(provider: Connection["provider"], value
   return normalized;
 }
 
-export function ollamaThinkingSetting(model: string): false | "low" {
-  return model.toLocaleLowerCase().includes("gpt-oss") ? "low" : false;
+export function resolveReasoningEffort(connection: Connection): string | undefined {
+  return connection.reasoningEffort;
+}
+
+export function ollamaThinkValue(effort: string): unknown {
+  return effort === "none" ? false : effort;
 }
 
 const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
@@ -115,11 +119,31 @@ function isReasoningModel(model: string): boolean {
   return REASONING_MODEL_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
-export function openAiCompatibleThinkingSetting(model: string): Record<string, unknown> {
-  if (!isReasoningModel(model)) return {};
-  // Ollama's /v1 honors reasoning_effort ("none" disables thinking, including for GPT-OSS);
-  // vLLM and LM Studio honor chat_template_kwargs. Servers ignore fields they do not support.
-  return { chat_template_kwargs: { enable_thinking: false }, reasoning_effort: "none" };
+export function supportedReasoningEfforts(provider: ProviderKind, model: string): string[] {
+  const lower = model.toLowerCase();
+  if (lower.includes("gpt-oss")) {
+    // vLLM's Harmony path rejects "none" for GPT-OSS; Ollama accepts it.
+    return provider === "ollama" ? ["none", "low", "medium", "high"] : ["low", "medium", "high"];
+  }
+  if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
+  return [];
+}
+
+export function parseOllamaShowThinking(data: unknown): { values: string[]; default?: string } | null {
+  if (!data || typeof data !== "object") return null;
+  const thinking = (data as JsonRecord).thinking;
+  if (!thinking || typeof thinking !== "object") return null;
+  const map = (value: unknown): string | undefined =>
+    typeof value === "boolean" ? (value ? "on" : "none") : typeof value === "string" ? value : undefined;
+  const rawValues: unknown[] = Array.isArray(thinking.values) ? thinking.values : [];
+  const values = rawValues.map(map).filter((value): value is string => Boolean(value));
+  if (!values.length) return null;
+  return { values, default: map(thinking.default) };
+}
+
+export async function scanOllamaThinking(connection: Connection, model: string, secretOverride?: string): Promise<{ values: string[]; default?: string } | null> {
+  const data = await request(connection, "/api/show", { method: "POST", body: JSON.stringify({ model }) }, 10_000, secretOverride);
+  return parseOllamaShowThinking(data);
 }
 
 export function openAiCompatibleMaxTokens(model: string, requested: number | undefined): number {
@@ -352,12 +376,14 @@ export function providerResponseDiagnosticDetails(
   model: string,
   requestedMaxTokens: number,
   evidence: ProviderResponseEvidence,
-  responseMode: "text" | "agent"
+  responseMode: "text" | "agent",
+  reasoningEffort?: string
 ): Record<string, string | number | null | undefined> {
   return {
     provider,
     model,
     responseMode,
+    reasoningEffort: reasoningEffort ?? null,
     contentCharacters: evidence.text.length,
     reasoningCharacters: evidence.reasoningCharacters,
     finishReason: evidence.finishReason,
@@ -376,7 +402,7 @@ function logProviderResponse(
   evidence: ProviderResponseEvidence,
   responseMode: "text" | "agent"
 ): void {
-  diagnosticLog("info", "provider.response", providerResponseDiagnosticDetails(connection.provider, model, requestedMaxTokens, evidence, responseMode));
+  diagnosticLog("info", "provider.response", providerResponseDiagnosticDetails(connection.provider, model, requestedMaxTokens, evidence, responseMode, connection.reasoningEffort));
 }
 
 export function emptyProviderResponseMessage(
@@ -407,6 +433,7 @@ function finalizeTextResponse(connection: Connection, options: RequestOptions, e
 }
 
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
+  const effort = resolveReasoningEffort(connection);
   if (connection.provider === "ollama") {
     const data = (await request(connection, "/api/chat", {
       method: "POST",
@@ -414,7 +441,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       body: JSON.stringify({
         model: options.model,
         messages: options.messages,
-        think: ollamaThinkingSetting(options.model),
+        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
         stream: false,
         options: {
           temperature: options.temperature ?? 0,
@@ -517,7 +544,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       max_tokens: maxTokens,
       stream: false,
       ...(options.seed === undefined ? {} : { seed: options.seed }),
-      ...openAiCompatibleThinkingSetting(options.model)
+      ...(effort === undefined ? {} : { reasoning_effort: effort })
     })
   })) as JsonRecord;
 
@@ -667,6 +694,7 @@ export async function generateAgentTurn(
     signal?: AbortSignal;
   }
 ): Promise<AgentProviderTurn> {
+  const effort = resolveReasoningEffort(connection);
   const system = options.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
 
   if (connection.provider === "ollama") {
@@ -686,7 +714,7 @@ export async function generateAgentTurn(
         model: options.model,
         messages,
         tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
-        think: ollamaThinkingSetting(options.model),
+        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
         stream: false,
         options: { temperature: options.temperature ?? 0, num_predict: options.maxTokens ?? 800 }
       })
