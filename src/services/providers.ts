@@ -123,7 +123,8 @@ const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
 
 function isReasoningModel(model: string): boolean {
   const lower = model.toLowerCase();
-  return REASONING_MODEL_PATTERNS.some((pattern) => lower.includes(pattern));
+  return REASONING_MODEL_PATTERNS.some((pattern) => lower.includes(pattern))
+    || /(^|\/)o[1-9]/.test(lower) || lower.includes("gpt-5");
 }
 
 export function supportedReasoningEfforts(provider: ProviderKind, model: string): string[] {
@@ -132,6 +133,11 @@ export function supportedReasoningEfforts(provider: ProviderKind, model: string)
     // vLLM's Harmony path rejects "none" for GPT-OSS; Ollama accepts it.
     return provider === "ollama" ? ["none", "low", "medium", "high"] : ["low", "medium", "high"];
   }
+  // OpenAI's native reasoning families cannot disable thinking, and accepted
+  // values differ by family: o1 is low/high only, o3+ adds medium, GPT-5 adds minimal.
+  if (/(^|\/)o1/.test(lower)) return ["low", "high"];
+  if (/(^|\/)o[3-9]/.test(lower)) return ["low", "medium", "high"];
+  if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
   if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
   return [];
 }

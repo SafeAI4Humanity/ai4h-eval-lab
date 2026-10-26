@@ -126,7 +126,7 @@ describe("resolveReasoningEffort", () => {
   });
 
   it("returns undefined for models with no thinking control", () => {
-    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" }, "gpt-5-2")).toBeUndefined();
+    expect(resolveReasoningEffort({ ...connection, reasoningEffort: "low" }, "gpt-4o")).toBeUndefined();
   });
 
   it("rejects an effort the target model does not support", () => {
@@ -151,7 +151,15 @@ describe("supportedReasoningEfforts", () => {
 
   it("offers levels for other reasoning models and nothing for non-reasoning models", () => {
     expect(supportedReasoningEfforts("openai-compatible", "qwen3.8:latest")).toEqual(["none", "low", "medium", "high"]);
-    expect(supportedReasoningEfforts("openai-compatible", "gpt-5-2")).toEqual([]);
+    expect(supportedReasoningEfforts("openai-compatible", "gpt-4o")).toEqual([]);
+  });
+
+  it("recognizes OpenAI native reasoning families with family-accurate values (no none — thinking cannot be disabled)", () => {
+    expect(supportedReasoningEfforts("openai", "o1-mini")).toEqual(["low", "high"]);
+    expect(supportedReasoningEfforts("openai", "o3")).toEqual(["low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openai", "o4-mini")).toEqual(["low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openai", "gpt-5")).toEqual(["minimal", "low", "medium", "high"]);
+    expect(supportedReasoningEfforts("openrouter", "openai/o3")).toEqual(["low", "medium", "high"]);
   });
 });
 
@@ -179,7 +187,8 @@ describe("openAiCompatibleMaxTokens", () => {
 
   it("applies the larger fallback only when the suite declares no budget", () => {
     expect(openAiCompatibleMaxTokens("qwen3.8:latest", undefined)).toBe(1000);
-    expect(openAiCompatibleMaxTokens("gpt-5-2", undefined)).toBe(500);
+    expect(openAiCompatibleMaxTokens("gpt-4o", undefined)).toBe(500);
+    expect(openAiCompatibleMaxTokens("gpt-5-2", undefined)).toBe(1000); // GPT-5 is a reasoning family
   });
 });
 
