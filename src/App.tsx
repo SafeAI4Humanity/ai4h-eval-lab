@@ -62,6 +62,7 @@ import {
   withSuite
 } from "./services/localSuites";
 import { checkForAppUpdate, currentAppVersion, openReleasePage, type AppUpdateState } from "./services/updates";
+import { checkInAppUpdate, type InAppUpdate } from "./services/updater";
 import {
   clearDiagnosticEntries,
   getDiagnosticConfig,
@@ -169,6 +170,9 @@ function App() {
   const [interfaceScale, setInterfaceScale] = useState<InterfaceScale>(storage.getInterfaceScale);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ status: "idle", currentVersion: currentAppVersion });
   const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
+  const [inAppUpdate, setInAppUpdate] = useState<InAppUpdate | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -269,9 +273,28 @@ function App() {
     }
   };
 
+  const installAvailableUpdate = async () => {
+    if (!inAppUpdate || installingUpdate) return;
+    setInstallingUpdate(true);
+    setInstallError(null);
+    try {
+      await inAppUpdate.downloadAndInstall();
+    } catch (error) {
+      setInstallError(error instanceof Error ? error.message : "Could not install the update.");
+    } finally {
+      setInstallingUpdate(false);
+    }
+  };
+
+  const refreshInAppUpdate = async () => {
+    const update = await checkInAppUpdate();
+    if (update) setInAppUpdate(update);
+  };
+
   useEffect(() => {
     void checkCatalogs(true);
     void checkAppUpdates();
+    void refreshInAppUpdate();
     // Catalog and app update checks happen once on launch; subsequent checks are user initiated.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -358,7 +381,8 @@ function App() {
           {appUpdate.status === "available" && !updateNoticeDismissed && (
             <section className="app-update-banner" role="status" aria-live="polite">
               <span className="update-banner-icon"><Download size={19} /></span>
-              <div><strong>AI4H Eval Lab {appUpdate.release.tagName} is available</strong><span>You are using v{appUpdate.currentVersion}. Review the release notes before downloading the installer for your platform.</span></div>
+              <div><strong>AI4H Eval Lab {appUpdate.release.tagName} is available</strong><span>You are using v{appUpdate.currentVersion}. {inAppUpdate ? "Install the update in place, or review the release notes first." : "Review the release notes before downloading the installer for your platform."}</span>{installError && <span className="update-error">{installError}</span>}</div>
+              {inAppUpdate && <button className="button button-primary button-small" onClick={installAvailableUpdate} disabled={installingUpdate}><Download size={15} /> {installingUpdate ? "Installing…" : "Install update"}</button>}
               <button className="button button-primary button-small" onClick={openAvailableUpdate}><ExternalLink size={15} /> View release</button>
               <button className="icon-button small" onClick={() => setUpdateNoticeDismissed(true)} aria-label="Dismiss update notification"><X size={16} /></button>
             </section>
