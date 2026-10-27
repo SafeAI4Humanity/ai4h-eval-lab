@@ -45,7 +45,7 @@ import {
   XCircle
 } from "lucide-react";
 import { bundledCatalogInfo, bundledSuites, refreshCatalogs } from "./services/catalog";
-import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, testConnection } from "./services/providers";
+import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, scanOllamaThinking, supportedReasoningEfforts, testConnection } from "./services/providers";
 import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, ModelReviewResponseError, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
 import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
@@ -998,7 +998,8 @@ export function NewEvaluation({ suites, connections, onStart, onConnections, ini
         connectionId: connection.id,
         provider: connection.provider,
         connectionName: connection.name,
-        model: target.model.trim()
+        model: target.model.trim(),
+        ...(connection.reasoningEffort ? { reasoningEffort: connection.reasoningEffort } : {})
       };
     });
     if (selectedSuites.length && runTargets.length && runTargets.every((target) => target.model)) void onStart(name, selectedSuites, runTargets);
@@ -1600,6 +1601,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
   const [message, setMessage] = useState<string | null>(null);
   const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [scanningModal, setScanningModal] = useState(false);
+  const [thinkingValues, setThinkingValues] = useState<string[] | null>(null);
 
   const save = async () => {
     if (!editing || !editing.name.trim() || !editing.baseUrl.trim()) return;
@@ -1654,6 +1656,15 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
         lastCheckedAt: new Date().toISOString()
       } : null);
       setModalMessage(`${models.length} model${models.length === 1 ? "" : "s"} available for this connection.`);
+      if (editing.provider === "ollama" && models.length) {
+        const scannedModel = editing.modelHint && models.includes(editing.modelHint) ? editing.modelHint : models[0];
+        try {
+          const thinking = await scanOllamaThinking(candidate, scannedModel, editing.apiKey.trim() || undefined);
+          setThinkingValues(thinking ? thinking.values : null);
+        } catch {
+          setThinkingValues(null);
+        }
+      }
     } catch (error) {
       setEditing((current) => current ? { ...current, status: "unavailable" } : null);
       setModalMessage(error instanceof Error ? error.message : "The model provider could not be reached.");
@@ -1673,7 +1684,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
         eyebrow="Model access"
         title="Connections"
         description="Connect local and hosted model providers. Credentials are never included in evaluation data."
-        action={<button className="button button-primary" onClick={() => { setModalMessage(null); setEditing({ ...emptyConnection }); }}><Plus size={16} /> Add connection</button>}
+        action={<button className="button button-primary" onClick={() => { setModalMessage(null); setThinkingValues(null); setEditing({ ...emptyConnection }); }}><Plus size={16} /> Add connection</button>}
       />
       <div className="security-banner"><KeyRound size={19} /><div><strong>Credentials stay protected</strong><span>Desktop builds store API keys in the operating system credential vault. Browser preview keeps them only for this session.</span></div></div>
       {message && <div className="inline-message"><Wifi size={16} /> {message}<button onClick={() => setMessage(null)}><X size={14} /></button></div>}
@@ -1697,17 +1708,17 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
             {connection.modelHint && <div className="default-model"><span>Default model</span><strong>{connection.modelHint}</strong></div>}
             <div className="connection-actions">
               <button className="button button-secondary button-small" disabled={testingId === connection.id} onClick={() => void test(connection)}>{testingId === connection.id ? <LoaderCircle className="spinning" size={15} /> : discoveryDetails(connection.provider) ? <RefreshCw size={15} /> : <Wifi size={15} />} {connectionTestLabel(connection.provider)}</button>
-              <button className="text-button" onClick={() => { setModalMessage(null); setEditing({ ...connection, apiKey: "" }); }}>Configure</button>
+              <button className="text-button" onClick={() => { setModalMessage(null); setThinkingValues(null); setEditing({ ...connection, apiKey: "" }); }}>Configure</button>
               <button className="icon-button small danger" onClick={() => void remove(connection)} aria-label="Delete connection"><Trash2 size={15} /></button>
             </div>
           </article>
         ))}
-        <button className="add-card" onClick={() => { setModalMessage(null); setEditing({ ...emptyConnection }); }}><span><Plus size={24} /></span><strong>Add a model provider</strong><small>Ollama, OpenRouter, Kie.ai, OpenAI, Anthropic, Gemini, or a compatible API</small></button>
+        <button className="add-card" onClick={() => { setModalMessage(null); setThinkingValues(null); setEditing({ ...emptyConnection }); }}><span><Plus size={24} /></span><strong>Add a model provider</strong><small>Ollama, OpenRouter, Kie.ai, OpenAI, Anthropic, Gemini, or a compatible API</small></button>
       </div>
       {editing && (
         <Modal title={editing.id ? "Configure connection" : "Add connection"} onClose={() => setEditing(null)}>
           <div className="modal-form">
-            <label className="field"><span>Provider</span><select value={editing.provider} onChange={(event) => { const provider = event.target.value as ProviderKind; const models = provider === "kie" ? kieModelIds() : undefined; setModalMessage(null); setEditing({ ...editing, provider, baseUrl: defaultBaseUrl(provider), models, modelHint: models?.[0], status: "untested", openRouterFreeOnly: provider === "openrouter" ? false : undefined }); }}>{providerOptions.map((option) => <option value={option.value} key={option.value}>{option.label} — {option.hint}</option>)}</select></label>
+            <label className="field"><span>Provider</span><select value={editing.provider} onChange={(event) => { const provider = event.target.value as ProviderKind; const models = provider === "kie" ? kieModelIds() : undefined; setModalMessage(null); setThinkingValues(null); setEditing({ ...editing, provider, baseUrl: defaultBaseUrl(provider), models, modelHint: models?.[0], status: "untested", openRouterFreeOnly: provider === "openrouter" ? false : undefined }); }}>{providerOptions.map((option) => <option value={option.value} key={option.value}>{option.label} — {option.hint}</option>)}</select></label>
             <label className="field"><span>Connection name</span><input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} placeholder="Research account" /></label>
             <label className="field"><span>Base URL</span><input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} /></label>
             {editing.provider !== "ollama" && <label className="field"><span>API key {editing.id && <small>· leave blank to keep the current key</small>}</span><input type="password" value={editing.apiKey} onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })} placeholder="Stored securely" autoComplete="off" /></label>}
@@ -1723,6 +1734,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
                 )}
               </div>
             )}
+            <label className="field"><span>Reasoning effort</span><select value={editing.reasoningEffort ?? ""} onChange={(event) => setEditing({ ...editing, reasoningEffort: event.target.value || undefined })}><option value="">Model default</option>{(thinkingValues ?? supportedReasoningEfforts(editing.provider, editing.modelHint ?? "")).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
             <p className="form-note"><ShieldCheck size={15} /> Secrets are excluded from logs, results, exports, and catalog requests.</p>
             <div className="modal-actions"><button className="button button-secondary" onClick={() => setEditing(null)}>Cancel</button><button className="button button-primary" onClick={() => void save()} disabled={!editing.name.trim() || !editing.baseUrl.trim()}>Save connection</button></div>
           </div>

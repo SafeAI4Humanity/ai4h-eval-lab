@@ -75,6 +75,20 @@ describe("evaluation publication bundles", () => {
     expect(submissionFileName(submission)).toBe("11111111-1111-4111-8111-111111111111.json");
   });
 
+  it("records the effort on each published result target", () => {
+    const effortRun: EvaluationRun = {
+      ...run,
+      targets: [{ ...run.targets[0], reasoningEffort: "high" }],
+      results: [{ ...run.results[0], target: { ...run.results[0].target, reasoningEffort: "high" } }]
+    };
+    const submission = buildEvaluationSubmission(effortRun, [suite], { submitter: "Public Researcher", notes: "" }, "0.5.0", {
+      submissionId: "11111111-1111-4111-8111-111111111111",
+      submittedAt: "2026-07-22T00:00:00.000Z"
+    });
+    expect(submission.run.targets[0]).toMatchObject({ reasoningEffort: "high" });
+    expect(submission.run.results[0].target).toEqual({ provider: "ollama", model: "llama3.2:latest", reasoningEffort: "high" });
+  });
+
   it("publishes stage evidence while redacting local multi-turn errors", () => {
     const multiTurnRun: EvaluationRun = {
       ...run,

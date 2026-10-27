@@ -1,4 +1,4 @@
-import type { ChatMessage, Connection, ProviderResponse } from "../types";
+import type { ChatMessage, Connection, ProviderKind, ProviderResponse } from "../types";
 import { appFetch, normalizeBaseUrl, readJson } from "./http";
 import { getSecret } from "./storage";
 import { diagnosticLog, redactDiagnosticUrl } from "./diagnostics";
@@ -104,8 +104,70 @@ export function normalizeProviderBaseUrl(provider: Connection["provider"], value
   return normalized;
 }
 
-export function ollamaThinkingSetting(model: string): false | "low" {
-  return model.toLocaleLowerCase().includes("gpt-oss") ? "low" : false;
+export function resolveReasoningEffort(connection: Connection, model: string): string | undefined {
+  const effort = connection.reasoningEffort;
+  if (effort === undefined) return undefined;
+  // For Ollama the /api/show scan is authoritative: boolean controls normalize to
+  // "on"/"none", which the static level list would otherwise reject before
+  // ollamaThinkValue can convert them back.
+  if (connection.provider === "ollama") return effort;
+  const supported = supportedReasoningEfforts(connection.provider, model);
+  if (!supported.length) return undefined; // model advertises no thinking control
+  if (!supported.includes(effort)) {
+    throw new Error(`Reasoning effort "${effort}" is not supported by ${model} on this connection (supported: ${supported.join(", ")}).`);
+  }
+  return effort;
+}
+
+export function ollamaThinkValue(effort: string): unknown {
+  return effort === "none" ? false : effort === "on" ? true : effort;
+}
+
+const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
+
+function isReasoningModel(model: string): boolean {
+  const lower = model.toLowerCase();
+  return REASONING_MODEL_PATTERNS.some((pattern) => lower.includes(pattern))
+    || /(^|\/)o[1-9]/.test(lower) || lower.includes("gpt-5");
+}
+
+export function supportedReasoningEfforts(provider: ProviderKind, model: string): string[] {
+  const lower = model.toLowerCase();
+  if (lower.includes("gpt-oss")) {
+    // vLLM's Harmony path rejects "none" for GPT-OSS; Ollama accepts it.
+    return provider === "ollama" ? ["none", "low", "medium", "high"] : ["low", "medium", "high"];
+  }
+  // OpenAI's native reasoning families cannot disable thinking, and accepted
+  // values differ by family: o1 is low/high only, o3+ adds medium, GPT-5 adds minimal.
+  if (/(^|\/)o1/.test(lower)) return ["low", "high"];
+  if (/(^|\/)o[3-9]/.test(lower)) return ["low", "medium", "high"];
+  if (lower.includes("gpt-5-pro")) return ["high"]; // Pro models run at a fixed effort
+  if (lower.includes("gpt-5.1") || lower.includes("gpt-5-1")) return ["none", "low", "medium", "high"];
+  if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
+  if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
+  return [];
+}
+
+export function parseOllamaShowThinking(data: unknown): { values: string[]; default?: string } | null {
+  if (!data || typeof data !== "object") return null;
+  const thinking = (data as JsonRecord).thinking;
+  if (!thinking || typeof thinking !== "object") return null;
+  const map = (value: unknown): string | undefined =>
+    typeof value === "boolean" ? (value ? "on" : "none") : typeof value === "string" ? value : undefined;
+  const rawValues: unknown[] = Array.isArray(thinking.values) ? thinking.values : [];
+  const values = rawValues.map(map).filter((value): value is string => Boolean(value));
+  if (!values.length) return null;
+  return { values, default: map(thinking.default) };
+}
+
+export async function scanOllamaThinking(connection: Connection, model: string, secretOverride?: string): Promise<{ values: string[]; default?: string } | null> {
+  const data = await request(connection, "/api/show", { method: "POST", body: JSON.stringify({ model }) }, 10_000, secretOverride);
+  return parseOllamaShowThinking(data);
+}
+
+export function openAiCompatibleMaxTokens(model: string, requested: number | undefined): number {
+  if (requested !== undefined) return requested;
+  return isReasoningModel(model) ? 1000 : 500;
 }
 
 async function request(
@@ -333,12 +395,14 @@ export function providerResponseDiagnosticDetails(
   model: string,
   requestedMaxTokens: number,
   evidence: ProviderResponseEvidence,
-  responseMode: "text" | "agent"
+  responseMode: "text" | "agent",
+  reasoningEffort?: string
 ): Record<string, string | number | null | undefined> {
   return {
     provider,
     model,
     responseMode,
+    reasoningEffort: reasoningEffort ?? null,
     contentCharacters: evidence.text.length,
     reasoningCharacters: evidence.reasoningCharacters,
     finishReason: evidence.finishReason,
@@ -357,7 +421,7 @@ function logProviderResponse(
   evidence: ProviderResponseEvidence,
   responseMode: "text" | "agent"
 ): void {
-  diagnosticLog("info", "provider.response", providerResponseDiagnosticDetails(connection.provider, model, requestedMaxTokens, evidence, responseMode));
+  diagnosticLog("info", "provider.response", providerResponseDiagnosticDetails(connection.provider, model, requestedMaxTokens, evidence, responseMode, connection.reasoningEffort));
 }
 
 export function emptyProviderResponseMessage(
@@ -388,6 +452,7 @@ function finalizeTextResponse(connection: Connection, options: RequestOptions, e
 }
 
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
+  const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
     const data = (await request(connection, "/api/chat", {
       method: "POST",
@@ -395,7 +460,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       body: JSON.stringify({
         model: options.model,
         messages: options.messages,
-        think: ollamaThinkingSetting(options.model),
+        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
         stream: false,
         options: {
           temperature: options.temperature ?? 0,
@@ -479,6 +544,7 @@ export async function generateResponse(connection: Connection, options: RequestO
       signal: options.signal,
       body: JSON.stringify({
         messages: options.messages,
+        ...(effort === undefined ? {} : { reasoning_effort: effort }),
         temperature: options.temperature ?? 0,
         max_tokens: options.maxTokens ?? 500,
         stream: false
@@ -487,6 +553,7 @@ export async function generateResponse(connection: Connection, options: RequestO
     return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
   }
 
+  const maxTokens = openAiCompatibleMaxTokens(options.model, options.maxTokens);
   const data = (await request(connection, "/v1/chat/completions", {
     method: "POST",
     signal: options.signal,
@@ -494,13 +561,14 @@ export async function generateResponse(connection: Connection, options: RequestO
       model: options.model,
       messages: options.messages,
       temperature: options.temperature ?? 0,
-      max_tokens: options.maxTokens ?? 500,
+      max_tokens: maxTokens,
       stream: false,
-      ...(options.seed === undefined ? {} : { seed: options.seed })
+      ...(options.seed === undefined ? {} : { seed: options.seed }),
+      ...(effort === undefined ? {} : { reasoning_effort: effort })
     })
   })) as JsonRecord;
 
-  return finalizeTextResponse(connection, options, parseOpenAiResponseEvidence(data));
+  return finalizeTextResponse(connection, { ...options, maxTokens }, parseOpenAiResponseEvidence(data));
 }
 
 export type AgentToolDefinition = {
@@ -646,6 +714,7 @@ export async function generateAgentTurn(
     signal?: AbortSignal;
   }
 ): Promise<AgentProviderTurn> {
+  const effort = resolveReasoningEffort(connection, options.model);
   const system = options.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
 
   if (connection.provider === "ollama") {
@@ -665,7 +734,7 @@ export async function generateAgentTurn(
         model: options.model,
         messages,
         tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
-        think: ollamaThinkingSetting(options.model),
+        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
         stream: false,
         options: { temperature: options.temperature ?? 0, num_predict: options.maxTokens ?? 800 }
       })
@@ -734,6 +803,7 @@ export async function generateAgentTurn(
       messages: openAiMessages(options.messages),
       tools: options.tools.map((tool) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
       tool_choice: "auto",
+      ...(effort === undefined ? {} : { reasoning_effort: effort }),
       temperature: options.temperature ?? 0,
       max_tokens: options.maxTokens ?? 800,
       stream: false
