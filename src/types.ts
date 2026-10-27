@@ -13,6 +13,7 @@ export type Connection = {
   provider: ProviderKind;
   baseUrl: string;
   modelHint?: string;
+  reasoningEffort?: string;
   enabled: boolean;
   status?: "connected" | "unavailable" | "untested";
   lastCheckedAt?: string;
@@ -151,6 +152,7 @@ export type RunTarget = {
   provider: ProviderKind;
   connectionName: string;
   model: string;
+  reasoningEffort?: string;
 };
 
 export type EvaluationOutcome = {

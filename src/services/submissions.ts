@@ -19,6 +19,7 @@ export type SubmissionSchemaVersion = 1 | 2 | 3;
 export type PublishedTarget = {
   provider: ProviderKind;
   model: string;
+  reasoningEffort?: string;
 };
 
 export type PublishedReview =
@@ -160,7 +161,7 @@ function publishResult(result: CaseResult, schemaVersion: SubmissionSchemaVersio
     caseId: result.caseId,
     caseTitle: result.caseTitle,
     caseMessages: result.caseMessages as NonNullable<CaseResult["caseMessages"]>,
-    target: { provider: result.target.provider, model: result.target.model },
+    target: { provider: result.target.provider, model: result.target.model, ...(result.target.reasoningEffort ? { reasoningEffort: result.target.reasoningEffort } : {}) },
     response: result.response,
     startedAt: result.startedAt,
     completedAt: result.completedAt,
@@ -229,7 +230,7 @@ export function buildEvaluationSubmission(
       completedAt: run.completedAt as string,
       status: "completed",
       suiteSnapshots,
-      targets: run.targets.map((target) => ({ provider: target.provider, model: target.model })),
+      targets: run.targets.map((target) => ({ provider: target.provider, model: target.model, ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}) })),
       results: run.results.map((result) => publishResult(result, schemaVersion))
     }
   };
