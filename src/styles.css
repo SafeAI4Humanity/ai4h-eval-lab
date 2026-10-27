@@ -165,7 +165,7 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .library-toolbar { min-height: 59px; display: flex; align-items: center; gap: 14px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: white; box-shadow: var(--shadow); }
 .search-box { min-width: 260px; flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: #82918e; }
 .search-box input, .mini-search input { width: 100%; height: 35px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: calc(11px * var(--font-scale)); }
-.category-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: #f0f4f3; }
+.category-tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border-radius: 8px; background: #f0f4f3; }
 .category-tabs button { min-height: 31px; padding: 0 10px; border: 0; border-radius: 6px; color: #70817d; background: transparent; font-size: calc(9px * var(--font-scale)); font-weight: 650; cursor: pointer; }
 .category-tabs button.active { color: var(--teal-800); background: white; box-shadow: 0 1px 4px rgba(25,55,49,.08); }
 .suite-count { margin: 19px 2px 11px; color: #84928f; font-size: calc(10px * var(--font-scale)); }
@@ -626,7 +626,6 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 @media (max-width: 1180px) {
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .suite-grid, .connection-grid { grid-template-columns: 1fr 1fr; }
-  .category-tabs button:nth-child(n+4) { display: none; }
   .score-row { grid-template-columns: 110px repeat(3,1fr); }
   .score-stat:nth-last-child(-n+2) { border-top: 1px solid #e1e8e6; }
 }

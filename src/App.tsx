@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { bundledCatalogInfo, bundledSuites, refreshCatalogs } from "./services/catalog";
 import { defaultBaseUrl, kieModelIds, normalizeProviderBaseUrl, providerLabel, scanOllamaThinking, supportedReasoningEfforts, testConnection } from "./services/providers";
+import { CATEGORY_GROUPS, categoryGroup } from "./services/categories";
 import { bulkReviewCandidates, connectedReviewTargets, isSameReviewerModel, latestReview, ModelReviewResponseError, reviewVerdictLabel, runModelReview, type BulkReviewScope } from "./services/reviews";
 import { executeRun, runSummary, suiteRequestCount, type RunProgress } from "./services/runner";
 import { buildEvaluationSubmission, publicationIssues, submissionFileName } from "./services/submissions";
@@ -841,11 +842,11 @@ function TestLibrary({ suites, sources, onRunSuite }: { suites: TestSuite[]; sou
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [inspecting, setInspecting] = useState<TestSuite | null>(null);
-  const categories = ["All", ...new Set(suites.map((suite) => suite.category))];
+  const groups = ["All", ...CATEGORY_GROUPS.filter((group) => suites.some((suite) => categoryGroup(suite.category) === group))];
   const filtered = suites.filter((suite) => {
     const normalize = (value: string) => value.toLowerCase().replace(/[-&]/g, " ").replace(/\s+/g, " ").trim();
     const text = normalize(`${suite.title} ${suite.summary} ${suite.tags.join(" ")}`);
-    return (category === "All" || suite.category === category) && text.includes(normalize(search));
+    return (category === "All" || categoryGroup(suite.category) === category) && text.includes(normalize(search));
   });
 
   return (
@@ -859,7 +860,7 @@ function TestLibrary({ suites, sources, onRunSuite }: { suites: TestSuite[]; sou
       <div className="library-toolbar">
         <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search suites, tags, or categories…" /></label>
         <div className="category-tabs">
-          {categories.slice(0, 5).map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}
+          {groups.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}
         </div>
         <button className="button button-secondary"><Filter size={16} /> Filters</button>
       </div>
