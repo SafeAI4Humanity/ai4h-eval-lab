@@ -111,5 +111,5 @@ export async function deleteSecret(connectionId: string): Promise<void> {
 }
 
 export function isTauri(): boolean {
-  return "__TAURI_INTERNALS__" in window;
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
