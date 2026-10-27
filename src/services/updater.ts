@@ -8,9 +8,19 @@ export type InAppUpdate = {
 
 export type InAppUpdateChecker = () => Promise<InAppUpdate | null>;
 
+export type Relauncher = () => Promise<void>;
+
 export function normalizeUpdateNotes(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();
+}
+
+export async function relaunchApp(relauncher: Relauncher | null = null): Promise<void> {
+  const run = relauncher ?? (async () => {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  });
+  await run();
 }
 
 export async function checkInAppUpdate(

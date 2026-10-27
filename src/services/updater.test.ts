@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkInAppUpdate, normalizeUpdateNotes } from "./updater";
+import { checkInAppUpdate, normalizeUpdateNotes, relaunchApp } from "./updater";
 
 describe("in-app updater", () => {
   it("does not attempt an update check outside the Tauri runtime", async () => {
@@ -33,5 +33,13 @@ describe("in-app updater", () => {
   it("normalizes missing or padded release notes", () => {
     expect(normalizeUpdateNotes("  notes here \n")).toBe("notes here");
     expect(normalizeUpdateNotes(undefined)).toBe("");
+  });
+
+  it("relaunches the app after an install so the new version runs", async () => {
+    const calls: string[] = [];
+    await relaunchApp(async () => {
+      calls.push("relaunched");
+    });
+    expect(calls).toEqual(["relaunched"]);
   });
 });
