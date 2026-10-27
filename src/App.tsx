@@ -438,7 +438,7 @@ function App() {
               onRefresh={() => void checkCatalogs()}
               checking={catalogChecking}
               appUpdate={appUpdate}
-              onCheckUpdate={() => void checkAppUpdates()}
+              onCheckUpdate={() => { void checkAppUpdates(); void refreshInAppUpdate(); }}
               onOpenUpdate={openAvailableUpdate}
             />
           )}
