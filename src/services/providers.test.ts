@@ -183,6 +183,11 @@ describe("supportedReasoningEfforts", () => {
     expect(supportedReasoningEfforts("ollama", "muse-glimmer:latest")).toEqual(["none", "low", "medium", "high", "xhigh"]);
   });
 
+  it("keeps Muse Glimmer strengths Ollama-only — other providers get the generic values", () => {
+    expect(supportedReasoningEfforts("openai-compatible", "vendor/muse-glimmer")).toEqual([]);
+    expect(supportedReasoningEfforts("openai-compatible", "muse-glimmer-qwen3")).toEqual(["none", "low", "medium", "high"]);
+  });
+
   it("recognizes OpenAI native reasoning families with family-accurate values (no none — thinking cannot be disabled)", () => {
     expect(supportedReasoningEfforts("openai", "o1-mini")).toEqual(["low", "high"]);
     expect(supportedReasoningEfforts("openai", "o3")).toEqual(["low", "medium", "high"]);

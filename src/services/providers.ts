@@ -168,7 +168,9 @@ export function supportedReasoningEfforts(provider: ProviderKind, model: string)
   if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
   // Muse Glimmer's strength control is engine-level (the `think` request field);
   // /api/show does not advertise it, so the scan alone shows only "Model default".
-  if (lower.includes("muse-glimmer")) return ["none", "low", "medium", "high", "xhigh"];
+  // These strengths are Ollama-specific — other providers get the generic values,
+  // since the generic adapter sends `reasoning_effort`, not `think`.
+  if (provider === "ollama" && lower.includes("muse-glimmer")) return ["none", "low", "medium", "high", "xhigh"];
   if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
   return [];
 }
