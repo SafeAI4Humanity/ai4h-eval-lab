@@ -6,6 +6,7 @@ import {
   kieModelIds,
   normalizeProviderBaseUrl,
   ollamaNumPredict,
+  ollamaThinkingCapable,
   ollamaThinkValue,
   openAiCompatibleMaxTokens,
   parseOllamaShowThinking,
@@ -154,6 +155,16 @@ describe("ollamaNumPredict", () => {
     expect(ollamaNumPredict(350, false)).toBe(350);
     expect(ollamaNumPredict(undefined, true)).toBe(1500);
     expect(ollamaNumPredict(undefined, false)).toBe(500);
+  });
+});
+
+describe("ollamaThinkingCapable", () => {
+  it("uses the actual target model, not the connection-level effort", () => {
+    expect(ollamaThinkingCapable("qwen3:latest", "low", false)).toBe(true);
+    expect(ollamaThinkingCapable("muse-glimmer:latest", "low", false)).toBe(true);
+    expect(ollamaThinkingCapable("gpt-4o", "low", false)).toBe(false); // effort configured for a different model
+    expect(ollamaThinkingCapable("gpt-4o", "low", true)).toBe(true);   // observed to return reasoning
+    expect(ollamaThinkingCapable("qwen3:latest", "none", false)).toBe(false);
   });
 });
 

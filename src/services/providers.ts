@@ -136,6 +136,10 @@ export function ollamaNumPredict(maxTokens: number | undefined, thinkingCapable:
   return thinkingCapable ? base + OLLAMA_THINKING_ALLOWANCE : base;
 }
 
+export function ollamaThinkingCapable(model: string, effort: string | undefined, observed: boolean): boolean {
+  return effort !== "none" && (supportedReasoningEfforts("ollama", model).length > 0 || observed);
+}
+
 // Models that think without advertising a thinking control via /api/show
 // (always-thinking chat templates) are recorded once they actually return
 // reasoning, so later cases get the allowance directly.
@@ -500,10 +504,12 @@ export async function generateResponse(connection: Connection, options: RequestO
   const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
     const key = `${connection.id}:${options.model}`;
-    const thinkingCapable =
-      effort !== "none" && (effort !== undefined || isReasoningModel(options.model) || observedThinkingModels.has(key));
+    // Capability comes from the actual target model, not the connection-level
+    // effort — the builder can select a different model from the same connection.
+    const thinkingCapable = ollamaThinkingCapable(options.model, effort, observedThinkingModels.has(key));
+    const effectiveEffort = thinkingCapable || effort === "none" ? effort : undefined;
     const firstBudget = ollamaNumPredict(options.maxTokens, thinkingCapable);
-    const first = await ollamaTextAttempt(connection, options, effort, firstBudget);
+    const first = await ollamaTextAttempt(connection, options, effectiveEffort, firstBudget);
     if (!first.text.trim() && first.finishReason?.toLowerCase() === "length" && first.reasoningCharacters) {
       observedThinkingModels.add(key);
       const retryBudget = firstBudget + OLLAMA_THINKING_ALLOWANCE;
@@ -513,7 +519,7 @@ export async function generateResponse(connection: Connection, options: RequestO
         firstBudget,
         retryBudget
       });
-      const retry = await ollamaTextAttempt(connection, options, effort, retryBudget);
+      const retry = await ollamaTextAttempt(connection, options, effectiveEffort, retryBudget);
       return finalizeTextResponse(connection, options, retry, retryBudget);
     }
     return finalizeTextResponse(connection, options, first, firstBudget);
