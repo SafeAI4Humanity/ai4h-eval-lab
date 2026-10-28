@@ -5,6 +5,8 @@ import {
   emptyProviderResponseMessage,
   kieModelIds,
   normalizeProviderBaseUrl,
+  ollamaNumPredict,
+  ollamaThinkingCapable,
   ollamaThinkValue,
   openAiCompatibleMaxTokens,
   parseOllamaShowThinking,
@@ -147,6 +149,25 @@ describe("ollamaThinkValue", () => {
   });
 });
 
+describe("ollamaNumPredict", () => {
+  it("adds the thinking allowance only for thinking-capable models", () => {
+    expect(ollamaNumPredict(350, true)).toBe(1350);
+    expect(ollamaNumPredict(350, false)).toBe(350);
+    expect(ollamaNumPredict(undefined, true)).toBe(1500);
+    expect(ollamaNumPredict(undefined, false)).toBe(500);
+  });
+});
+
+describe("ollamaThinkingCapable", () => {
+  it("uses the actual target model, not the connection-level effort", () => {
+    expect(ollamaThinkingCapable("qwen3:latest", "low", false)).toBe(true);
+    expect(ollamaThinkingCapable("muse-glimmer:latest", "low", false)).toBe(true);
+    expect(ollamaThinkingCapable("gpt-4o", "low", false)).toBe(false); // effort configured for a different model
+    expect(ollamaThinkingCapable("gpt-4o", "low", true)).toBe(true);   // observed to return reasoning
+    expect(ollamaThinkingCapable("qwen3:latest", "none", false)).toBe(false);
+  });
+});
+
 describe("supportedReasoningEfforts", () => {
   it("excludes none for GPT-OSS on generic OpenAI-compatible backends (vLLM Harmony rejects it)", () => {
     expect(supportedReasoningEfforts("openai-compatible", "gpt-oss:120b")).toEqual(["low", "medium", "high"]);
@@ -156,6 +177,15 @@ describe("supportedReasoningEfforts", () => {
   it("offers levels for other reasoning models and nothing for non-reasoning models", () => {
     expect(supportedReasoningEfforts("openai-compatible", "qwen3.8:latest")).toEqual(["none", "low", "medium", "high"]);
     expect(supportedReasoningEfforts("openai-compatible", "gpt-4o")).toEqual([]);
+  });
+
+  it("offers the documented strengths for Muse Glimmer despite /api/show reporting no thinking field", () => {
+    expect(supportedReasoningEfforts("ollama", "muse-glimmer:latest")).toEqual(["none", "low", "medium", "high", "xhigh"]);
+  });
+
+  it("keeps Muse Glimmer strengths Ollama-only — other providers get the generic values", () => {
+    expect(supportedReasoningEfforts("openai-compatible", "vendor/muse-glimmer")).toEqual([]);
+    expect(supportedReasoningEfforts("openai-compatible", "muse-glimmer-qwen3")).toEqual(["none", "low", "medium", "high"]);
   });
 
   it("recognizes OpenAI native reasoning families with family-accurate values (no none — thinking cannot be disabled)", () => {

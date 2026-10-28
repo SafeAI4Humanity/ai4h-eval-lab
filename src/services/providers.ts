@@ -123,6 +123,28 @@ export function ollamaThinkValue(effort: string): unknown {
   return effort === "none" ? false : effort === "on" ? true : effort;
 }
 
+// Ollama counts reasoning tokens against num_predict, so a thinking model needs
+// room for thinking on top of the answer budget. The allowance is applied only
+// when the model can actually reason — num_predict is a usable cap, not a
+// reserved reasoning partition, so unconditional allowance would let
+// non-thinking models exceed the declared per-case budget and results would not
+// be comparable across providers.
+export const OLLAMA_THINKING_ALLOWANCE = 1000;
+
+export function ollamaNumPredict(maxTokens: number | undefined, thinkingCapable: boolean): number {
+  const base = maxTokens ?? 500;
+  return thinkingCapable ? base + OLLAMA_THINKING_ALLOWANCE : base;
+}
+
+export function ollamaThinkingCapable(model: string, effort: string | undefined, observed: boolean): boolean {
+  return effort !== "none" && (supportedReasoningEfforts("ollama", model).length > 0 || observed);
+}
+
+// Models that think without advertising a thinking control via /api/show
+// (always-thinking chat templates) are recorded once they actually return
+// reasoning, so later cases get the allowance directly.
+const observedThinkingModels = new Set<string>();
+
 const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
 
 function isReasoningModel(model: string): boolean {
@@ -144,6 +166,11 @@ export function supportedReasoningEfforts(provider: ProviderKind, model: string)
   if (lower.includes("gpt-5-pro")) return ["high"]; // Pro models run at a fixed effort
   if (lower.includes("gpt-5.1") || lower.includes("gpt-5-1")) return ["none", "low", "medium", "high"];
   if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
+  // Muse Glimmer's strength control is engine-level (the `think` request field);
+  // /api/show does not advertise it, so the scan alone shows only "Model default".
+  // These strengths are Ollama-specific — other providers get the generic values,
+  // since the generic adapter sends `reasoning_effort`, not `think`.
+  if (provider === "ollama" && lower.includes("muse-glimmer")) return ["none", "low", "medium", "high", "xhigh"];
   if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
   return [];
 }
@@ -444,32 +471,60 @@ export function emptyProviderResponseMessage(
   return `${name} returned HTTP 200 but no final text in a recognized response field (finish reason: ${reason}; text field: ${evidence.textField}). The response was not scored.`;
 }
 
-function finalizeTextResponse(connection: Connection, options: RequestOptions, evidence: ProviderResponseEvidence): ProviderResponse {
-  const requestedMaxTokens = options.maxTokens ?? 500;
+function finalizeTextResponse(connection: Connection, options: RequestOptions, evidence: ProviderResponseEvidence, effectiveMaxTokens?: number): ProviderResponse {
+  const requestedMaxTokens = effectiveMaxTokens ?? options.maxTokens ?? 500;
   logProviderResponse(connection, options.model, requestedMaxTokens, evidence, "text");
   if (!evidence.text.trim()) throw new Error(emptyProviderResponseMessage(connection.provider, evidence, requestedMaxTokens));
   return { text: evidence.text, promptTokens: evidence.promptTokens, completionTokens: evidence.completionTokens };
 }
 
+async function ollamaTextAttempt(
+  connection: Connection,
+  options: RequestOptions,
+  effort: string | undefined,
+  numPredict: number
+): Promise<ProviderResponseEvidence> {
+  const data = (await request(connection, "/api/chat", {
+    method: "POST",
+    signal: options.signal,
+    body: JSON.stringify({
+      model: options.model,
+      messages: options.messages,
+      ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
+      stream: false,
+      options: {
+        temperature: options.temperature ?? 0,
+        num_predict: numPredict,
+        ...(options.seed === undefined ? {} : { seed: options.seed })
+      }
+    })
+  })) as JsonRecord;
+  return parseOllamaResponseEvidence(data);
+}
+
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
   const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
-    const data = (await request(connection, "/api/chat", {
-      method: "POST",
-      signal: options.signal,
-      body: JSON.stringify({
+    const key = `${connection.id}:${options.model}`;
+    // Capability comes from the actual target model, not the connection-level
+    // effort — the builder can select a different model from the same connection.
+    const thinkingCapable = ollamaThinkingCapable(options.model, effort, observedThinkingModels.has(key));
+    const effectiveEffort = thinkingCapable || effort === "none" ? effort : undefined;
+    const firstBudget = ollamaNumPredict(options.maxTokens, thinkingCapable);
+    const first = await ollamaTextAttempt(connection, options, effectiveEffort, firstBudget);
+    if (!first.text.trim() && first.finishReason?.toLowerCase() === "length" && first.reasoningCharacters) {
+      observedThinkingModels.add(key);
+      const retryBudget = firstBudget + OLLAMA_THINKING_ALLOWANCE;
+      diagnosticLog("info", "ollama.truncation.retry", {
         model: options.model,
-        messages: options.messages,
-        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
-        stream: false,
-        options: {
-          temperature: options.temperature ?? 0,
-          num_predict: options.maxTokens ?? 500,
-          ...(options.seed === undefined ? {} : { seed: options.seed })
-        }
-      })
-    })) as JsonRecord;
-    return finalizeTextResponse(connection, options, parseOllamaResponseEvidence(data));
+        reasoningCharacters: first.reasoningCharacters,
+        firstBudget,
+        retryBudget
+      });
+      const retry = await ollamaTextAttempt(connection, options, effectiveEffort, retryBudget);
+      return finalizeTextResponse(connection, options, retry, retryBudget);
+    }
+    return finalizeTextResponse(connection, options, first, firstBudget);
   }
 
   if (connection.provider === "anthropic") {
