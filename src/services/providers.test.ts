@@ -149,12 +149,11 @@ describe("ollamaThinkValue", () => {
 });
 
 describe("ollamaNumPredict", () => {
-  it("adds the thinking allowance on top of the answer budget unless effort is none", () => {
-    expect(ollamaNumPredict(350, undefined)).toBe(1350);
-    expect(ollamaNumPredict(350, "on")).toBe(1350);
-    expect(ollamaNumPredict(350, "low")).toBe(1350);
-    expect(ollamaNumPredict(350, "none")).toBe(350);
-    expect(ollamaNumPredict(undefined, undefined)).toBe(1500);
+  it("adds the thinking allowance only for thinking-capable models", () => {
+    expect(ollamaNumPredict(350, true)).toBe(1350);
+    expect(ollamaNumPredict(350, false)).toBe(350);
+    expect(ollamaNumPredict(undefined, true)).toBe(1500);
+    expect(ollamaNumPredict(undefined, false)).toBe(500);
   });
 });
 

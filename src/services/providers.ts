@@ -124,14 +124,22 @@ export function ollamaThinkValue(effort: string): unknown {
 }
 
 // Ollama counts reasoning tokens against num_predict, so a thinking model needs
-// room for thinking on top of the answer budget. The allowance is a cap, not a
-// target — models that never think simply never use it.
+// room for thinking on top of the answer budget. The allowance is applied only
+// when the model can actually reason — num_predict is a usable cap, not a
+// reserved reasoning partition, so unconditional allowance would let
+// non-thinking models exceed the declared per-case budget and results would not
+// be comparable across providers.
 export const OLLAMA_THINKING_ALLOWANCE = 1000;
 
-export function ollamaNumPredict(maxTokens: number | undefined, effort: string | undefined): number {
+export function ollamaNumPredict(maxTokens: number | undefined, thinkingCapable: boolean): number {
   const base = maxTokens ?? 500;
-  return effort === "none" ? base : base + OLLAMA_THINKING_ALLOWANCE;
+  return thinkingCapable ? base + OLLAMA_THINKING_ALLOWANCE : base;
 }
+
+// Models that think without advertising a thinking control via /api/show
+// (always-thinking chat templates) are recorded once they actually return
+// reasoning, so later cases get the allowance directly.
+const observedThinkingModels = new Set<string>();
 
 const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
 
@@ -488,10 +496,14 @@ async function ollamaTextAttempt(
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
   const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
-    const firstBudget = ollamaNumPredict(options.maxTokens, effort);
+    const key = `${connection.id}:${options.model}`;
+    const thinkingCapable =
+      (effort !== undefined && effort !== "none") || isReasoningModel(options.model) || observedThinkingModels.has(key);
+    const firstBudget = ollamaNumPredict(options.maxTokens, thinkingCapable);
     const first = await ollamaTextAttempt(connection, options, effort, firstBudget);
     if (!first.text.trim() && first.finishReason?.toLowerCase() === "length" && first.reasoningCharacters) {
-      const retryBudget = (options.maxTokens ?? 500) + OLLAMA_THINKING_ALLOWANCE * 2;
+      observedThinkingModels.add(key);
+      const retryBudget = ollamaNumPredict(options.maxTokens, true);
       diagnosticLog("info", "ollama.truncation.retry", {
         model: options.model,
         reasoningCharacters: first.reasoningCharacters,
