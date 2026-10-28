@@ -123,6 +123,16 @@ export function ollamaThinkValue(effort: string): unknown {
   return effort === "none" ? false : effort === "on" ? true : effort;
 }
 
+// Ollama counts reasoning tokens against num_predict, so a thinking model needs
+// room for thinking on top of the answer budget. The allowance is a cap, not a
+// target — models that never think simply never use it.
+export const OLLAMA_THINKING_ALLOWANCE = 1000;
+
+export function ollamaNumPredict(maxTokens: number | undefined, effort: string | undefined): number {
+  const base = maxTokens ?? 500;
+  return effort === "none" ? base : base + OLLAMA_THINKING_ALLOWANCE;
+}
+
 const REASONING_MODEL_PATTERNS = ["qwen3", "deepseek-r1", "qwq", "gpt-oss"];
 
 function isReasoningModel(model: string): boolean {
@@ -444,32 +454,54 @@ export function emptyProviderResponseMessage(
   return `${name} returned HTTP 200 but no final text in a recognized response field (finish reason: ${reason}; text field: ${evidence.textField}). The response was not scored.`;
 }
 
-function finalizeTextResponse(connection: Connection, options: RequestOptions, evidence: ProviderResponseEvidence): ProviderResponse {
-  const requestedMaxTokens = options.maxTokens ?? 500;
+function finalizeTextResponse(connection: Connection, options: RequestOptions, evidence: ProviderResponseEvidence, effectiveMaxTokens?: number): ProviderResponse {
+  const requestedMaxTokens = effectiveMaxTokens ?? options.maxTokens ?? 500;
   logProviderResponse(connection, options.model, requestedMaxTokens, evidence, "text");
   if (!evidence.text.trim()) throw new Error(emptyProviderResponseMessage(connection.provider, evidence, requestedMaxTokens));
   return { text: evidence.text, promptTokens: evidence.promptTokens, completionTokens: evidence.completionTokens };
 }
 
+async function ollamaTextAttempt(
+  connection: Connection,
+  options: RequestOptions,
+  effort: string | undefined,
+  numPredict: number
+): Promise<ProviderResponseEvidence> {
+  const data = (await request(connection, "/api/chat", {
+    method: "POST",
+    signal: options.signal,
+    body: JSON.stringify({
+      model: options.model,
+      messages: options.messages,
+      ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
+      stream: false,
+      options: {
+        temperature: options.temperature ?? 0,
+        num_predict: numPredict,
+        ...(options.seed === undefined ? {} : { seed: options.seed })
+      }
+    })
+  })) as JsonRecord;
+  return parseOllamaResponseEvidence(data);
+}
+
 export async function generateResponse(connection: Connection, options: RequestOptions): Promise<ProviderResponse> {
   const effort = resolveReasoningEffort(connection, options.model);
   if (connection.provider === "ollama") {
-    const data = (await request(connection, "/api/chat", {
-      method: "POST",
-      signal: options.signal,
-      body: JSON.stringify({
+    const firstBudget = ollamaNumPredict(options.maxTokens, effort);
+    const first = await ollamaTextAttempt(connection, options, effort, firstBudget);
+    if (!first.text.trim() && first.finishReason?.toLowerCase() === "length" && first.reasoningCharacters) {
+      const retryBudget = (options.maxTokens ?? 500) + OLLAMA_THINKING_ALLOWANCE * 2;
+      diagnosticLog("info", "ollama.truncation.retry", {
         model: options.model,
-        messages: options.messages,
-        ...(effort === undefined ? {} : { think: ollamaThinkValue(effort) }),
-        stream: false,
-        options: {
-          temperature: options.temperature ?? 0,
-          num_predict: options.maxTokens ?? 500,
-          ...(options.seed === undefined ? {} : { seed: options.seed })
-        }
-      })
-    })) as JsonRecord;
-    return finalizeTextResponse(connection, options, parseOllamaResponseEvidence(data));
+        reasoningCharacters: first.reasoningCharacters,
+        firstBudget,
+        retryBudget
+      });
+      const retry = await ollamaTextAttempt(connection, options, effort, retryBudget);
+      return finalizeTextResponse(connection, options, retry, retryBudget);
+    }
+    return finalizeTextResponse(connection, options, first, firstBudget);
   }
 
   if (connection.provider === "anthropic") {

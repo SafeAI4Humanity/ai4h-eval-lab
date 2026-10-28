@@ -5,6 +5,7 @@ import {
   emptyProviderResponseMessage,
   kieModelIds,
   normalizeProviderBaseUrl,
+  ollamaNumPredict,
   ollamaThinkValue,
   openAiCompatibleMaxTokens,
   parseOllamaShowThinking,
@@ -144,6 +145,16 @@ describe("ollamaThinkValue", () => {
     expect(ollamaThinkValue("none")).toBe(false);
     expect(ollamaThinkValue("on")).toBe(true);
     expect(ollamaThinkValue("low")).toBe("low");
+  });
+});
+
+describe("ollamaNumPredict", () => {
+  it("adds the thinking allowance on top of the answer budget unless effort is none", () => {
+    expect(ollamaNumPredict(350, undefined)).toBe(1350);
+    expect(ollamaNumPredict(350, "on")).toBe(1350);
+    expect(ollamaNumPredict(350, "low")).toBe(1350);
+    expect(ollamaNumPredict(350, "none")).toBe(350);
+    expect(ollamaNumPredict(undefined, undefined)).toBe(1500);
   });
 });
 
