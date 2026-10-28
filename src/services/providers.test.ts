@@ -168,6 +168,10 @@ describe("supportedReasoningEfforts", () => {
     expect(supportedReasoningEfforts("openai-compatible", "gpt-4o")).toEqual([]);
   });
 
+  it("offers the documented strengths for Muse Glimmer despite /api/show reporting no thinking field", () => {
+    expect(supportedReasoningEfforts("ollama", "muse-glimmer:latest")).toEqual(["none", "low", "medium", "high", "xhigh"]);
+  });
+
   it("recognizes OpenAI native reasoning families with family-accurate values (no none — thinking cannot be disabled)", () => {
     expect(supportedReasoningEfforts("openai", "o1-mini")).toEqual(["low", "high"]);
     expect(supportedReasoningEfforts("openai", "o3")).toEqual(["low", "medium", "high"]);

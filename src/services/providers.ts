@@ -162,6 +162,9 @@ export function supportedReasoningEfforts(provider: ProviderKind, model: string)
   if (lower.includes("gpt-5-pro")) return ["high"]; // Pro models run at a fixed effort
   if (lower.includes("gpt-5.1") || lower.includes("gpt-5-1")) return ["none", "low", "medium", "high"];
   if (lower.includes("gpt-5")) return ["minimal", "low", "medium", "high"];
+  // Muse Glimmer's strength control is engine-level (the `think` request field);
+  // /api/show does not advertise it, so the scan alone shows only "Model default".
+  if (lower.includes("muse-glimmer")) return ["none", "low", "medium", "high", "xhigh"];
   if (isReasoningModel(model)) return ["none", "low", "medium", "high"];
   return [];
 }
