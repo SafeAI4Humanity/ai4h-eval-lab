@@ -498,12 +498,12 @@ export async function generateResponse(connection: Connection, options: RequestO
   if (connection.provider === "ollama") {
     const key = `${connection.id}:${options.model}`;
     const thinkingCapable =
-      (effort !== undefined && effort !== "none") || isReasoningModel(options.model) || observedThinkingModels.has(key);
+      effort !== "none" && (effort !== undefined || isReasoningModel(options.model) || observedThinkingModels.has(key));
     const firstBudget = ollamaNumPredict(options.maxTokens, thinkingCapable);
     const first = await ollamaTextAttempt(connection, options, effort, firstBudget);
     if (!first.text.trim() && first.finishReason?.toLowerCase() === "length" && first.reasoningCharacters) {
       observedThinkingModels.add(key);
-      const retryBudget = ollamaNumPredict(options.maxTokens, true);
+      const retryBudget = firstBudget + OLLAMA_THINKING_ALLOWANCE;
       diagnosticLog("info", "ollama.truncation.retry", {
         model: options.model,
         reasoningCharacters: first.reasoningCharacters,
