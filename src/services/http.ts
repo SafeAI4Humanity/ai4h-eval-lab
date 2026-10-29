@@ -24,12 +24,22 @@ export async function appFetch(input: string, init?: RequestInit): Promise<Respo
     });
     return response;
   } catch (error) {
+    let causeChain: string | undefined = undefined;
+    if (desktop) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        causeChain = await invoke("probe_url", { url: input });
+      } catch {
+        // The probe is best-effort diagnostics; never mask the original failure.
+      }
+    }
     diagnosticLog("error", "network.failure", {
       method,
       url,
       durationMs: Date.now() - startedAt,
       transport: desktop ? "tauri-http" : "browser-fetch",
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      causeChain
     });
     throw error;
   }

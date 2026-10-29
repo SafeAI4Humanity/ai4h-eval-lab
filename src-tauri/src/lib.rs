@@ -28,6 +28,26 @@ fn delete_secret(connection_id: String) -> Result<(), String> {
     }
 }
 
+/// Best-effort diagnostic probe: re-issues a GET and returns the full reqwest
+/// error chain (DNS / connect / proxy causes that the HTTP plugin drops when
+/// it serializes errors to the frontend as its top-level Display string).
+#[tauri::command]
+async fn probe_url(url: String) -> String {
+    let client = reqwest::Client::new();
+    match client.get(&url).send().await {
+        Ok(response) => format!("probe succeeded: HTTP {}", response.status()),
+        Err(error) => {
+            let mut chain = vec![error.to_string()];
+            let mut source = std::error::Error::source(&error);
+            while let Some(err) = source {
+                chain.push(err.to_string());
+                source = err.source();
+            }
+            chain.join(" <- ")
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -38,7 +58,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             store_secret,
             get_secret,
-            delete_secret
+            delete_secret,
+            probe_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI4H Eval Lab");
