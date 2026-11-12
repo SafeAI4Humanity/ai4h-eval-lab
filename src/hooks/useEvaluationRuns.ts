@@ -6,12 +6,20 @@ import { storage } from "../services/storage";
 export function useEvaluationRuns() {
   const [runs, setRuns] = useState<EvaluationRun[]>(storage.getRuns);
   const current = useRef(runs);
+  // activeRun follows the most recently *received* run; App's Results view tracks a separate
+  // user selection (selectedRunId), so the two notions of "current run" can differ while a run is live.
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const persist = (next: EvaluationRun[]) => {
     current.current = next;
     setRuns(next);
-    storage.setRuns(next);
+    try {
+      storage.setRuns(next);
+    } catch (error) {
+      // Persistence must not propagate through the runner's progress callback
+      // and abort the evaluation itself (e.g. storage quota on raw responses).
+      console.error("Failed to persist evaluation runs", error);
+    }
   };
 
   const receiveRun = (snapshot: EvaluationRun) => {
@@ -22,7 +30,8 @@ export function useEvaluationRuns() {
       results: snapshot.results.map((result) => {
         const saved = previousResults.get(result.id)?.reviews ?? [];
         if (!saved.length) return result;
-        const reviews = new Map([...saved, ...(result.reviews ?? [])].map((review) => [review.id, review]));
+        // Saved reviews win on duplicate ids: a snapshot may echo one back, but the saved copy is the source of truth.
+        const reviews = new Map([...(result.reviews ?? []), ...saved].map((review) => [review.id, review]));
         return { ...result, reviews: [...reviews.values()] };
       })
     };

@@ -28,6 +28,18 @@ const review: ResultReview = { id: "human-review", reviewerType: "human", verdic
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
+it("keeps the run alive when persistence fails (storage quota)", () => {
+  const { result } = renderHook(useEvaluationRuns);
+  const setItem = localStorage.setItem;
+  localStorage.setItem = () => { throw new Error("QuotaExceededError"); };
+  try {
+    expect(() => act(() => result.current.receiveRun(run))).not.toThrow();
+    expect(result.current.runs).toHaveLength(1);
+  } finally {
+    localStorage.setItem = setItem;
+  }
+});
+
 it("lets the user inspect and review a response without stopping the run or losing notes to new results", () => {
   const onSaveReview = vi.fn();
   const onCancel = vi.fn();

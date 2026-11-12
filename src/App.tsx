@@ -175,6 +175,7 @@ function App() {
   const [installError, setInstallError] = useState<string | null>(null);
   const [installedVersion, setInstalledVersion] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [runGuardNotice, setRunGuardNotice] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.interfaceScale = interfaceScale;
@@ -297,26 +298,31 @@ function App() {
 
   const beginRun = async (name: string, selectedSuites: TestSuite[], targets: RunTarget[]) => {
     if (abortRef.current) {
+      setRunGuardNotice("Evaluation in progress — returned to the live run.");
       navigate("live-run");
       return;
     }
+    setRunGuardNotice(null);
     const controller = new AbortController();
     abortRef.current = controller;
     setPage("live-run");
-    const completed = await executeRun(
-      name,
-      selectedSuites,
-      targets,
-      connections,
-      (run, nextProgress) => {
-        receiveRun(run);
-        setProgress(nextProgress);
-      },
-      controller.signal
-    );
-    abortRef.current = null;
-    receiveRun(completed);
-    setSelectedRunId(completed.id);
+    try {
+      const completed = await executeRun(
+        name,
+        selectedSuites,
+        targets,
+        connections,
+        (run, nextProgress) => {
+          receiveRun(run);
+          setProgress(nextProgress);
+        },
+        controller.signal
+      );
+      receiveRun(completed);
+      setSelectedRunId(completed.id);
+    } finally {
+      abortRef.current = null;
+    }
   };
 
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null;
@@ -402,7 +408,10 @@ function App() {
           )}
           {page === "new-run" && <NewEvaluation initialSuiteKey={initialSuiteKey} suites={allSuites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
           {page === "live-run" && (
-            <LiveRun connections={connections} onSaveReview={saveResultReview} run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
+            <>
+              {runGuardNotice && <section className="security-banner" role="status" aria-live="polite"><div><strong>{runGuardNotice}</strong></div></section>}
+              <LiveRun connections={connections} onSaveReview={saveResultReview} run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
+            </>
           )}
           {page === "results" && (
             <Results
@@ -1194,7 +1203,7 @@ export function LiveRun({ run, progress, connections, onSaveReview, onCancel, on
 function EvidenceRow({ result, expanded, onToggle }: { result: CaseResult; expanded: boolean; onToggle: () => void }) {
   const review = latestReview(result);
   return (
-    <button type="button" className="evidence-row evidence-toggle" aria-expanded={expanded} onClick={onToggle}>
+    <button type="button" className="evidence-row evidence-toggle" aria-expanded={expanded} aria-controls={`evidence-detail-${result.id}`} onClick={onToggle}>
       <span className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={13} /> : result.status === "fail" || result.status === "error" ? <X size={13} /> : <CircleHelp size={13} />}</span>
       <div><strong>{result.caseTitle}</strong><span>{result.target.model} · {result.target.connectionName}</span>{result.error && <small>{result.error}</small>}<small>{expanded ? "Hide response" : "Review response"}{review ? ` · ${review.reviewerType === "human" ? "Human" : "Model"}: ${reviewVerdictLabel(review.verdict)}` : ""}</small></div>
       <span className={`status-chip ${result.status}`}>{result.status}</span>
@@ -1205,7 +1214,7 @@ function EvidenceRow({ result, expanded, onToggle }: { result: CaseResult; expan
 
 function ResultDetail({ result, connections, onSave }: { result: CaseResult; connections: Connection[]; onSave: (review: ResultReview) => void }) {
   return (
-    <div className="result-detail">
+    <div className="result-detail" id={`evidence-detail-${result.id}`}>
       {result.executionType === "agent_tool" && result.agentEvidence ? <AgentToolEvidence result={result} /> : result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
         <ResultReviewContext result={result} />
         <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>

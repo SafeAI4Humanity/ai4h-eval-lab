@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -10,6 +10,9 @@ export default defineConfig({
     host: "127.0.0.1"
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
+  test: {
+    setupFiles: ["./src/test-setup.ts"]
+  },
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG,
