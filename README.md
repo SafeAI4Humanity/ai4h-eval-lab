@@ -103,3 +103,19 @@ AI4H Eval Lab is an open-source project of the Safe AI for Humanity Foundation, 
 ## License
 
 Apache License 2.0. Test content in the companion suite repository is generally CC BY 4.0.
+
+## Model provider proxy
+
+Open **Settings & sources → Provider proxy** or use **Configure the proxy for
+all model providers** on the Connections page. Enable the proxy, enter an HTTP
+or HTTPS server address (for example `http://localhost:8080` or
+`https://proxy.example.com:8443`), and save. The setting persists locally and
+applies to new provider requests, including model scans, evaluation requests,
+agent tool-use turns, and model-assisted reviews. Local providers also use it;
+there are no per-provider exceptions.
+
+When enabled, connection failures show an error and never retry directly.
+Catalogs and application updates retain their usual transport. Proxy routing
+requires the desktop app; browser preview blocks provider requests when it is
+enabled. Proxy addresses with embedded credentials, paths, queries, or fragments
+are rejected. HTTPS certificate verification remains enabled.

@@ -1,3 +1,4 @@
+import type { ProviderProxySettings } from "./providerProxy";
 import type { CatalogSource, Connection, EvaluationRun, LocalSuite } from "../types";
 
 export type InterfaceScale = "default" | "comfortable" | "large" | "extra-large";
@@ -7,6 +8,7 @@ const keys = {
   sources: "ai4h.sources.v1",
   runs: "ai4h.runs.v1",
   localSuites: "ai4h.local-suites.v1",
+  providerProxy: "ai4h.provider-proxy.v1",
   interfaceScale: "ai4h.interface-scale.v1"
 };
 
@@ -67,6 +69,8 @@ function write<T>(key: string, value: T): void {
 }
 
 export const storage = {
+  getProviderProxy: () => read<ProviderProxySettings>(keys.providerProxy, { enabled: false, url: "" }),
+  setProviderProxy: (value: ProviderProxySettings) => write(keys.providerProxy, value),
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
   getSources: readSources,
