@@ -771,3 +771,11 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
   .authoring-layout { grid-template-columns: 1fr; }
   .authoring-yaml, .authoring-checks { position: static; }
 }
+
+/* Completed responses remain reviewable as the live stream grows. */
+.evidence-toggle { width: 100%; border: 0; border-bottom: 1px solid #e9efed; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.evidence-toggle:hover, .evidence-toggle[aria-expanded="true"] { background: #f0f7f5; }
+.evidence-toggle:focus-visible { outline: 2px solid var(--teal-700); outline-offset: -2px; }
+.evidence-toggle > div > small:last-child { color: #287568; }
+.evidence-stream .result-detail { padding-left: 18px; }
+.evidence-stream .result-detail, .evidence-stream .review-context-grid { grid-template-columns: 1fr; }

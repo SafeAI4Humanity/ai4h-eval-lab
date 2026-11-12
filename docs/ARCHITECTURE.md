@@ -41,3 +41,21 @@ At startup, bundled suites are immediately available. Enabled remote sources are
 - Runs are processed sequentially to favor stable ordering and conservative rate usage.
 - Model-assisted review is provisional evidence with reviewer identity and the raw reviewing-model response preserved alongside the result.
 - App-update signing and macOS notarization require release credentials and are not enabled in source control.
+
+## Reviewing an evaluation in progress
+
+Completed case responses in the live evidence stream expand to show the same
+stored prompts, raw responses, evaluator evidence, and review controls as the
+Results view. Multi-turn and agent cases expose their complete evidence once
+the case finishes. Human and connected-model reviews can be saved while later
+cases continue; requesting a model review does not pause evaluation requests.
+A Live evaluation navigation item returns to the active run after visiting
+another section.
+
+`useEvaluationRuns` persists incoming run snapshots and reviews in one state
+store. It merges reviews by result and review ID when the runner reports
+progress, completion, or cancellation, preserving separately saved reviews and
+the original automatic outcomes. This also preserves a model review that
+returns after the evaluation completes. Saved evidence and reviews remain in
+local storage after a reload; an interrupted evaluation is not automatically
+resumed.
