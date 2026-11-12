@@ -59,3 +59,20 @@ the original automatic outcomes. This also preserves a model review that
 returns after the evaluation completes. Saved evidence and reviews remain in
 local storage after a reload; an interrupted evaluation is not automatically
 resumed.
+
+## Provider proxy routing
+
+`providerFetch` is the shared boundary for every request in `providers.ts`.
+It reads the global `ai4h.provider-proxy.v1` setting for each new request and
+passes the configured address via the Tauri HTTP plugin's `proxy.all` option.
+This covers both HTTP and HTTPS provider destinations, including Gemini's
+separate discovery and generation paths. `appFetch` remains the transport for
+non-provider resources.
+
+An enabled proxy is fail-closed: invalid configuration, browser preview, and
+proxy connection failures do not trigger a direct request. Network failures
+produce a proxy-specific error; HTTP 407 reports proxy authentication failure.
+The existing native diagnostic probe is skipped for proxied requests because
+it would otherwise issue a separate direct GET. Cancellation remains a
+cancellation rather than a proxy error. Both HTTP and HTTPS proxy servers are
+accepted without disabling certificate checks.

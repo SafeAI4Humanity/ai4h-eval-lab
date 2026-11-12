@@ -1,3 +1,4 @@
+import { ProviderProxySettings } from "./components/ProviderProxySettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useEvaluationRuns } from "./hooks/useEvaluationRuns";
 import {
@@ -157,6 +158,7 @@ function connectionTestLabel(provider: ProviderKind): string {
 
 function App() {
   const [page, setPage] = useState<Page>("dashboard");
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const [mobileNav, setMobileNav] = useState(false);
   const [connections, setConnections] = useState<Connection[]>(storage.getConnections);
   const [sources, setSources] = useState<CatalogSource[]>(storage.getSources);
@@ -292,6 +294,7 @@ function App() {
 
   const navigate = (next: Page) => {
     setPage(next);
+    setSettingsSection(undefined);
     setInitialSuiteKey(undefined);
     setMobileNav(false);
   };
@@ -424,9 +427,10 @@ function App() {
               onSaveReview={saveResultReview}
             />
           )}
-          {page === "connections" && <Connections connections={connections} onChange={persistConnections} />}
+          {page === "connections" && <Connections connections={connections} onChange={persistConnections} onProxySettings={() => { navigate("settings"); setSettingsSection("provider-proxy-settings"); }} />}
           {page === "settings" && (
             <SettingsPage
+              initialSection={settingsSection}
               sources={sources}
               interfaceScale={interfaceScale}
               onInterfaceScaleChange={persistInterfaceScale}
@@ -1637,10 +1641,11 @@ function ResultReviewPanel({ result, connections, onSave }: { result: CaseResult
   );
 }
 
-function Connections({ connections, onChange }: { connections: Connection[]; onChange: (connections: Connection[]) => void }) {
+export function Connections({ connections, onChange, onProxySettings }: { connections: Connection[]; onChange: (connections: Connection[]) => void; onProxySettings: () => void }) {
   const [editing, setEditing] = useState<(typeof emptyConnection & { id?: string }) | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState(false);
   const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [scanningModal, setScanningModal] = useState(false);
   const [thinkingValues, setThinkingValues] = useState<string[] | null>(null);
@@ -1659,6 +1664,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
   const test = async (connection: Connection) => {
     setTestingId(connection.id);
     setMessage(null);
+    setMessageError(false);
     try {
       const models = await testConnection(connection);
       onChange(connections.map((item) => item.id === connection.id ? {
@@ -1671,6 +1677,7 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
       setMessage(`${connection.name} connected · ${models.length} model${models.length === 1 ? "" : "s"} found`);
     } catch (error) {
       onChange(connections.map((item) => item.id === connection.id ? { ...item, status: "unavailable", lastCheckedAt: new Date().toISOString() } : item));
+      setMessageError(true);
       setMessage(error instanceof Error ? error.message : "Connection failed.");
     } finally {
       setTestingId(null);
@@ -1729,7 +1736,8 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
         action={<button className="button button-primary" onClick={() => { setModalMessage(null); setThinkingValues(null); setEditing({ ...emptyConnection }); }}><Plus size={16} /> Add connection</button>}
       />
       <div className="security-banner"><KeyRound size={19} /><div><strong>Credentials stay protected</strong><span>Desktop builds store API keys in the operating system credential vault. Browser preview keeps them only for this session.</span></div></div>
-      {message && <div className="inline-message"><Wifi size={16} /> {message}<button onClick={() => setMessage(null)}><X size={14} /></button></div>}
+      <p><a href="#provider-proxy-settings" onClick={(event) => { event.preventDefault(); onProxySettings(); }}>Configure the proxy for all model providers</a></p>
+      {message && <div className="inline-message" role={messageError ? "alert" : "status"}><Wifi size={16} /> {message}<button onClick={() => setMessage(null)}><X size={14} /></button></div>}
       <div className="connection-grid">
         {connections.map((connection) => (
           <article className="connection-card" key={connection.id}>
@@ -1786,7 +1794,8 @@ function Connections({ connections, onChange }: { connections: Connection[]; onC
   );
 }
 
-function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChange, onRefresh, checking, appUpdate, onCheckUpdate, onOpenUpdate }: {
+function SettingsPage({ initialSection, sources, interfaceScale, onInterfaceScaleChange, onChange, onRefresh, checking, appUpdate, onCheckUpdate, onOpenUpdate }: {
+  initialSection?: string;
   sources: CatalogSource[];
   interfaceScale: InterfaceScale;
   onInterfaceScaleChange: (scale: InterfaceScale) => void;
@@ -1797,6 +1806,9 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
   onCheckUpdate: () => void;
   onOpenUpdate: () => void;
 }) {
+  useEffect(() => {
+    if (initialSection) document.getElementById(initialSection)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [initialSection]);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -1820,7 +1832,7 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
     <>
       <PageTitle eyebrow="Preferences" title="Settings & sources" description="Control community catalogs, privacy defaults, and application behavior." />
       <div className="settings-layout">
-        <div className="settings-nav panel"><button className="active" onClick={() => document.getElementById("appearance-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Settings size={17} /> Appearance</button><button onClick={() => document.getElementById("catalog-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><BookOpen size={17} /> Catalog sources</button><button><ShieldCheck size={17} /> Privacy</button><button onClick={() => document.getElementById("diagnostics-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Activity size={17} /> Diagnostics</button><button><SlidersHorizontal size={17} /> Evaluation defaults</button><button onClick={() => document.getElementById("update-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Download size={17} /> Updates</button></div>
+        <div className="settings-nav panel"><button className="active" onClick={() => document.getElementById("appearance-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Settings size={17} /> Appearance</button><button onClick={() => document.getElementById("catalog-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><BookOpen size={17} /> Catalog sources</button><button onClick={() => document.getElementById("provider-proxy-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Server size={17} /> Provider proxy</button><button><ShieldCheck size={17} /> Privacy</button><button onClick={() => document.getElementById("diagnostics-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Activity size={17} /> Diagnostics</button><button><SlidersHorizontal size={17} /> Evaluation defaults</button><button onClick={() => document.getElementById("update-settings")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Download size={17} /> Updates</button></div>
         <div className="settings-main">
           <section className="panel settings-section" id="appearance-settings">
             <div className="panel-heading"><div><h3>Appearance</h3><p>Make the app easier to read independently of your system display settings.</p></div></div>
@@ -1831,6 +1843,7 @@ function SettingsPage({ sources, interfaceScale, onInterfaceScaleChange, onChang
               </select>
             </div>
           </section>
+          <ProviderProxySettings />
           <section className="panel settings-section" id="catalog-settings">
             <div className="panel-heading"><div><h3>Test catalog sources</h3><p>AI4H checks enabled sources on launch. Third-party catalogs are visibly labeled.</p></div><button className="button button-secondary button-small" onClick={() => setAdding(true)}><Plus size={15} /> Add source</button></div>
             <div className="source-list">

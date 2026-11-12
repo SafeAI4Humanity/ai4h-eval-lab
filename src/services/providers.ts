@@ -1,5 +1,5 @@
 import type { ChatMessage, Connection, ProviderKind, ProviderResponse } from "../types";
-import { appFetch, normalizeBaseUrl, readJson } from "./http";
+import { providerFetch, normalizeBaseUrl, readJson } from "./http";
 import { getSecret } from "./storage";
 import { diagnosticLog, redactDiagnosticUrl } from "./diagnostics";
 
@@ -233,7 +233,7 @@ async function request(
   }, timeoutMs) : undefined;
 
   try {
-    const response = await appFetch(`${normalizeProviderBaseUrl(connection.provider, connection.baseUrl)}${path}`, {
+    const response = await providerFetch(`${normalizeProviderBaseUrl(connection.provider, connection.baseUrl)}${path}`, {
       ...init,
       headers,
       signal: controller?.signal ?? init.signal
@@ -282,7 +282,7 @@ export async function discoverModels(connection: Connection, secretOverride?: st
   if (connection.provider === "gemini") {
     const secret = secretOverride ?? await getSecret(connection.id);
     const suffix = secret ? `?key=${encodeURIComponent(secret)}` : "";
-    const response = await appFetch(`${normalizeBaseUrl(connection.baseUrl)}/v1beta/models${suffix}`);
+    const response = await providerFetch(`${normalizeBaseUrl(connection.baseUrl)}/v1beta/models${suffix}`);
     const data = (await readJson(response)) as JsonRecord;
     return (data.models ?? [])
       .filter((model: JsonRecord) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
@@ -550,7 +550,7 @@ export async function generateResponse(connection: Connection, options: RequestO
     const contents = options.messages
       .filter((message) => message.role !== "system")
       .map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }));
-    const response = await appFetch(
+    const response = await providerFetch(
       `${normalizeBaseUrl(connection.baseUrl)}/v1beta/models/${encodeURIComponent(options.model)}:generateContent?key=${encodeURIComponent(secret)}`,
       {
         method: "POST",
@@ -819,7 +819,7 @@ export async function generateAgentTurn(
 
   if (connection.provider === "gemini") {
     const secret = await getSecret(connection.id);
-    const response = await appFetch(
+    const response = await providerFetch(
       `${normalizeBaseUrl(connection.baseUrl)}/v1beta/models/${encodeURIComponent(options.model)}:generateContent?key=${encodeURIComponent(secret)}`,
       {
         method: "POST",

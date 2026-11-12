@@ -779,3 +779,5 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .evidence-toggle > div > small:last-child { color: #287568; }
 .evidence-stream .result-detail { padding-left: 18px; }
 .evidence-stream .result-detail, .evidence-stream .review-context-grid { grid-template-columns: 1fr; }
+
+.inline-message[role="alert"] { color: #b84242; border-color: #f6d4d4; background: #fff0f0; }

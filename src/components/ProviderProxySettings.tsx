@@ -1,0 +1,35 @@
+import { useState } from "react";
+import { isTauri, storage } from "../services/storage";
+import { normalizeProxyUrl, saveProviderProxy } from "../services/providerProxy";
+
+export function ProviderProxySettings() {
+  const [settings, setSettings] = useState(storage.getProviderProxy);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  let validationError = "";
+  if (settings.enabled) {
+    try { normalizeProxyUrl(settings.url); }
+    catch (error) { validationError = (error as Error).message; }
+  }
+  const save = () => {
+    try {
+      saveProviderProxy(settings);
+      setSettings(storage.getProviderProxy());
+      setSaved(true);
+      setSaveError("");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save the provider proxy.");
+    }
+  };
+  return (
+    <section className="panel settings-section" id="provider-proxy-settings">
+      <div className="panel-heading"><div><h3>Model provider proxy</h3><p>One proxy for every model provider, including local providers, connection checks, evaluations, and model-assisted reviews.</p></div></div>
+      <label className="toggle-row"><input type="checkbox" checked={settings.enabled} onChange={(event) => { setSettings({ ...settings, enabled: event.target.checked }); setSaved(false); setSaveError(""); }} /> Use a proxy for all model providers</label>
+      <label className="field"><span>Proxy URL</span><input type="url" value={settings.url} disabled={!settings.enabled} placeholder="http://localhost:8080 or https://proxy.example.com:8443" autoComplete="off" spellCheck={false} onChange={(event) => { setSettings({ ...settings, url: event.target.value }); setSaved(false); setSaveError(""); }} aria-describedby="provider-proxy-help" /></label>
+      <p id="provider-proxy-help" className="form-note">Accepts HTTP or HTTPS proxy addresses without embedded credentials. Changes apply to new requests after saving. When enabled, requests never fall back to a direct connection. Catalogs and app updates use their usual connection.</p>
+      {!isTauri() && <p className="form-note">Proxy routing requires the desktop app. Browser preview blocks provider requests while this setting is enabled.</p>}
+      {(validationError || saveError) && <p role="alert">{validationError || saveError}</p>}
+      <div className="page-actions"><button className="button button-primary button-small" disabled={Boolean(validationError)} onClick={save}>Save proxy settings</button>{saved && <span role="status">Proxy settings saved.</span>}</div>
+    </section>
+  );
+}
