@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useEvaluationRuns } from "./hooks/useEvaluationRuns";
 import {
   Activity,
   AlertTriangle,
@@ -161,10 +162,9 @@ function App() {
   const [sources, setSources] = useState<CatalogSource[]>(storage.getSources);
   const [suites, setSuites] = useState<TestSuite[]>(bundledSuites);
   const [localSuites, setLocalSuitesState] = useState<LocalSuite[]>(getLocalSuites);
-  const [runs, setRuns] = useState<EvaluationRun[]>(storage.getRuns);
+  const { runs, activeRun, receiveRun, saveResultReview } = useEvaluationRuns();
   const [catalogChecking, setCatalogChecking] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState("Bundled catalog ready");
-  const [activeRun, setActiveRun] = useState<EvaluationRun | null>(null);
   const [progress, setProgress] = useState<RunProgress>({ completed: 0, total: 0 });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(runs[0]?.id ?? null);
   const [interfaceScale, setInterfaceScale] = useState<InterfaceScale>(storage.getInterfaceScale);
@@ -190,11 +190,6 @@ function App() {
     storage.setSources(next);
   };
 
-  const persistRuns = (next: EvaluationRun[]) => {
-    setRuns(next);
-    storage.setRuns(next);
-  };
-
   const persistLocalSuites: React.Dispatch<React.SetStateAction<LocalSuite[]>> = (change) => {
     setLocalSuitesState((current) => {
       const next = typeof change === "function" ? change(current) : change;
@@ -216,19 +211,6 @@ function App() {
   const persistInterfaceScale = (next: InterfaceScale) => {
     setInterfaceScale(next);
     storage.setInterfaceScale(next);
-  };
-
-  const saveResultReview = (runId: string, resultId: string, review: ResultReview) => {
-    setRuns((currentRuns) => {
-      const nextRuns = currentRuns.map((run) => run.id === runId ? {
-        ...run,
-        results: run.results.map((result) => result.id === resultId
-          ? { ...result, reviews: [...(result.reviews ?? []), review] }
-          : result)
-      } : run);
-      storage.setRuns(nextRuns);
-      return nextRuns;
-    });
   };
 
   const checkCatalogs = async (quiet = false) => {
@@ -314,6 +296,10 @@ function App() {
   };
 
   const beginRun = async (name: string, selectedSuites: TestSuite[], targets: RunTarget[]) => {
+    if (abortRef.current) {
+      navigate("live-run");
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     setPage("live-run");
@@ -323,13 +309,13 @@ function App() {
       targets,
       connections,
       (run, nextProgress) => {
-        setActiveRun(run);
+        receiveRun(run);
         setProgress(nextProgress);
       },
       controller.signal
     );
     abortRef.current = null;
-    persistRuns([completed, ...runs.filter((run) => run.id !== completed.id)]);
+    receiveRun(completed);
     setSelectedRunId(completed.id);
   };
 
@@ -355,6 +341,7 @@ function App() {
               {item.page === "results" && runs.length > 0 && <small>{runs.length}</small>}
             </button>
           ))}
+          {activeRun?.status === "running" && <button className={page === "live-run" ? "active" : ""} onClick={() => navigate("live-run")}><Activity size={18} /><span>Live evaluation</span></button>}
           <p className="nav-label nav-label-secondary">Manage</p>
           <button className={page === "settings" ? "active" : ""} onClick={() => navigate("settings")}>
             <Settings size={18} />
@@ -415,7 +402,7 @@ function App() {
           )}
           {page === "new-run" && <NewEvaluation initialSuiteKey={initialSuiteKey} suites={allSuites} connections={connections} onStart={beginRun} onConnections={() => navigate("connections")} />}
           {page === "live-run" && (
-            <LiveRun run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
+            <LiveRun connections={connections} onSaveReview={saveResultReview} run={activeRun} progress={progress} onCancel={() => abortRef.current?.abort()} onResults={() => navigate("results")} />
           )}
           {page === "results" && (
             <Results
@@ -1161,7 +1148,8 @@ export function NewEvaluation({ suites, connections, onStart, onConnections, ini
   );
 }
 
-function LiveRun({ run, progress, onCancel, onResults }: { run: EvaluationRun | null; progress: RunProgress; onCancel: () => void; onResults: () => void }) {
+export function LiveRun({ run, progress, connections, onSaveReview, onCancel, onResults }: { run: EvaluationRun | null; progress: RunProgress; connections: Connection[]; onSaveReview: (runId: string, resultId: string, review: ResultReview) => void; onCancel: () => void; onResults: () => void }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   const percent = progress.total ? Math.round((progress.completed / progress.total) * 100) : 0;
   const summary = run ? runSummary(run) : { pass: 0, fail: 0, review: 0, error: 0 };
   const done = run?.status === "completed" || run?.status === "cancelled";
@@ -1187,9 +1175,14 @@ function LiveRun({ run, progress, onCancel, onResults }: { run: EvaluationRun | 
           </div>
         </section>
         <section className="panel evidence-stream">
-          <div className="panel-heading"><div><h3>Evidence stream</h3><p>Most recent results appear first</p></div></div>
+          <div className="panel-heading"><div><h3>Evidence stream</h3><p>Open a completed response to inspect evidence and save a review while the evaluation continues.</p></div></div>
           <div className="evidence-list">
-            {[...(run?.results ?? [])].reverse().map((result) => <EvidenceRow key={result.id} result={result} />)}
+            {[...(run?.results ?? [])].reverse().map((result) => (
+              <div key={result.id}>
+                <EvidenceRow result={result} expanded={expanded === result.id} onToggle={() => setExpanded(expanded === result.id ? null : result.id)} />
+                {expanded === result.id && run && <ResultDetail result={result} connections={connections} onSave={(review) => onSaveReview(run.id, result.id, review)} />}
+              </div>
+            ))}
             {!run?.results.length && <div className="empty-state compact"><LoaderCircle className="spinning" size={22} /><strong>Waiting for the first response</strong></div>}
           </div>
         </section>
@@ -1198,13 +1191,28 @@ function LiveRun({ run, progress, onCancel, onResults }: { run: EvaluationRun | 
   );
 }
 
-function EvidenceRow({ result }: { result: CaseResult }) {
+function EvidenceRow({ result, expanded, onToggle }: { result: CaseResult; expanded: boolean; onToggle: () => void }) {
+  const review = latestReview(result);
   return (
-    <div className="evidence-row">
+    <button type="button" className="evidence-row evidence-toggle" aria-expanded={expanded} onClick={onToggle}>
       <span className={`result-dot ${result.status}`}>{result.status === "pass" ? <Check size={13} /> : result.status === "fail" || result.status === "error" ? <X size={13} /> : <CircleHelp size={13} />}</span>
-      <div><strong>{result.caseTitle}</strong><span>{result.target.model} · {result.target.connectionName}</span>{result.error && <small>{result.error}</small>}</div>
+      <div><strong>{result.caseTitle}</strong><span>{result.target.model} · {result.target.connectionName}</span>{result.error && <small>{result.error}</small>}<small>{expanded ? "Hide response" : "Review response"}{review ? ` · ${review.reviewerType === "human" ? "Human" : "Model"}: ${reviewVerdictLabel(review.verdict)}` : ""}</small></div>
       <span className={`status-chip ${result.status}`}>{result.status}</span>
       <span className="latency">{result.latencyMs.toLocaleString()} ms</span>
+    </button>
+  );
+}
+
+function ResultDetail({ result, connections, onSave }: { result: CaseResult; connections: Connection[]; onSave: (review: ResultReview) => void }) {
+  return (
+    <div className="result-detail">
+      {result.executionType === "agent_tool" && result.agentEvidence ? <AgentToolEvidence result={result} /> : result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
+        <ResultReviewContext result={result} />
+        <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
+        <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
+      </>}
+      <ResultReviewPanel result={result} connections={connections} onSave={onSave} />
+      <small>Suite hash: {result.suiteHash ?? "not supplied"} · Started {new Date(result.startedAt).toISOString()}</small>
     </div>
   );
 }
@@ -1281,15 +1289,7 @@ function Results({
                     <span><ChevronDown className={expanded === result.id ? "rotated" : ""} size={17} /></span>
                   </button>
                   {expanded === result.id && (
-                    <div className="result-detail">
-                      {result.executionType === "agent_tool" && result.agentEvidence ? <AgentToolEvidence result={result} /> : result.executionType === "multi_turn" && result.turnResults?.length ? <MultiTurnEvidence result={result} /> : <>
-                        <ResultReviewContext result={result} />
-                        <div><h4>Raw model response</h4><pre>{result.response || result.error}</pre></div>
-                        <div><h4>Evaluator outcome evidence</h4>{result.outcomes.map((outcome, index) => <div className="evaluator-record" key={index}><p className={outcome.status}><span>{outcome.status === "pass" ? <Check size={13} /> : outcome.status === "fail" ? <X size={13} /> : <CircleHelp size={13} />}</span>{outcome.explanation}</p><small>{formatEvaluatorCriteria(outcome.evaluator)}</small></div>)}</div>
-                      </>}
-                      <ResultReviewPanel result={result} connections={connections} onSave={(nextReview) => onSaveReview(selected.id, result.id, nextReview)} />
-                      <small>Suite hash: {result.suiteHash ?? "not supplied"} · Started {new Date(result.startedAt).toISOString()}</small>
-                    </div>
+                    <ResultDetail result={result} connections={connections} onSave={(review) => onSaveReview(selected.id, result.id, review)} />
                   )}
                 </div>;
               })}
