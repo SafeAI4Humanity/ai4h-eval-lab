@@ -41,6 +41,10 @@ export function ProviderProxySettings() {
       setSettings(await storage.getProviderProxy());
       setSaved(true);
       setSaveError("");
+      // A successful save-and-reload proves the vault is reachable again, so the
+      // stale keychain failure must not keep rendering as an alert next to the
+      // confirmation on a recovered configuration.
+      setLoadError("");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Could not save the provider proxy.");
     } finally {

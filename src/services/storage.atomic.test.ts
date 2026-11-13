@@ -15,6 +15,7 @@ let gate: Promise<string> | null = null;
 let failWrites = false;
 let failReads = false;
 let failDeletes = false;
+let failDeleteIds = new Set<string>();
 
 const handler = vi.fn(async (command: string, args?: Record<string, unknown>) => {
   const payload = (args ?? {}) as Record<string, unknown>;
@@ -35,7 +36,7 @@ const handler = vi.fn(async (command: string, args?: Record<string, unknown>) =>
     return null;
   }
   if (command === "delete_secret") {
-    if (failDeletes) throw new Error("keychain unavailable");
+    if (failDeletes || failDeleteIds.has(id)) throw new Error("keychain unavailable");
     configAtCommit.push(localStorage.getItem(PERSISTED));
     vault.delete(id);
     return null;
@@ -51,6 +52,7 @@ beforeEach(() => {
   failWrites = false;
   failReads = false;
   failDeletes = false;
+  failDeleteIds = new Set();
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = { invoke: handler };
 });
 
@@ -142,4 +144,29 @@ it("retries failed cleanup on a later save instead of forgetting it", async () =
   expect(vault.get("provider-proxy:3")).toBe("newest key");
   expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual([]);
   await expect(storage.getProviderProxy()).resolves.toEqual({ enabled: true, url: "http://otherproxy:7070", key: "newest key" });
+});
+
+it("persists the cleanup set when its membership changes without changing its size", async () => {
+  await saveProviderProxy({ enabled: true, url: "http://proxy:8080", key: "old key" });
+
+  failDeletes = true;
+  await saveProviderProxy({ enabled: true, url: "http://newproxy:9090", key: "new key" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual(["provider-proxy:1"]);
+
+  // Recovery save where only the newly obsolete version fails: the retry of
+  // version 1 succeeds and version 2 fails, so the set goes from [1] to [2] at
+  // the same size — the write must compare contents, not just length, or the
+  // forgotten entry is never retried on later saves.
+  failDeletes = false;
+  failDeleteIds = new Set(["provider-proxy:2"]);
+  await saveProviderProxy({ enabled: true, url: "http://otherproxy:7070", key: "newest key" });
+
+  expect(vault.get("provider-proxy:1")).toBeUndefined();
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual(["provider-proxy:2"]);
+
+  // A later save retries the recorded entry and clears the list.
+  failDeleteIds = new Set();
+  await saveProviderProxy({ enabled: true, url: "http://finalproxy:6060", key: "final key" });
+  expect(vault.get("provider-proxy:2")).toBeUndefined();
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual([]);
 });

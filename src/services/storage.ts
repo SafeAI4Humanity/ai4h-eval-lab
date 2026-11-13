@@ -148,7 +148,11 @@ export const storage = {
       };
       await attemptCleanup(proxySecretId(previousVersion));
       for (const id of [...pending]) await attemptCleanup(id);
-      if (pending.size !== storedPending.length) write(keys.providerCleanup, [...pending]);
+      // Persist whenever membership differs, not just when the size changes: a
+      // successful retry plus a fresh failure can swap an entry while keeping the
+      // same size (e.g. [v1] becomes [v2]), and a length-only check would skip the
+      // write and forget the newly failed id forever.
+      if (pending.size !== storedPending.length || [...pending].some((id) => !storedPending.includes(id))) write(keys.providerCleanup, [...pending]);
     }
   },
   getConnections: () => read(keys.connections, defaultConnections),
