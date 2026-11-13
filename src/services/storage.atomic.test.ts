@@ -125,3 +125,21 @@ it("reports the save as committed when post-commit cleanup of the superseded ent
   expect(vault.get("provider-proxy:2")).toBe("new key");
   await expect(storage.getProviderProxy()).resolves.toEqual({ enabled: true, url: "http://newproxy:9090", key: "new key" });
 });
+
+it("retries failed cleanup on a later save instead of forgetting it", async () => {
+  await saveProviderProxy({ enabled: true, url: "http://proxy:8080", key: "old key" });
+
+  failDeletes = true;
+  await expect(saveProviderProxy({ enabled: true, url: "http://newproxy:9090", key: "new key" })).resolves.toBeUndefined();
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual(["provider-proxy:1"]);
+
+  // Once the keychain recovers, the next save retries the recorded entry — a save
+  // would otherwise only delete its own immediately preceding version.
+  failDeletes = false;
+  await saveProviderProxy({ enabled: true, url: "http://otherproxy:7070", key: "newest key" });
+
+  expect(vault.get("provider-proxy:1")).toBeUndefined();
+  expect(vault.get("provider-proxy:3")).toBe("newest key");
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy-cleanup.v1")!)).toEqual([]);
+  await expect(storage.getProviderProxy()).resolves.toEqual({ enabled: true, url: "http://otherproxy:7070", key: "newest key" });
+});

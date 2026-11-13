@@ -9,6 +9,7 @@ const keys = {
   runs: "ai4h.runs.v1",
   localSuites: "ai4h.local-suites.v1",
   providerProxy: "ai4h.provider-proxy.v1",
+  providerCleanup: "ai4h.provider-proxy-cleanup.v1",
   interfaceScale: "ai4h.interface-scale.v1"
 };
 
@@ -132,13 +133,22 @@ export const storage = {
     if (previousVersion > 0) {
       // Post-commit cleanup of the superseded entry is best-effort: the new pair
       // is already committed, so a rejected keychain delete must not report the
-      // save as failed. The orphaned entry is unreachable — the persisted config
-      // references only the new version.
-      try {
-        await deleteSecret(proxySecretId(previousVersion));
-      } catch {
-        // Left behind until the keychain recovers; harmless and unreferenced.
-      }
+      // save as failed. A transient failure is recorded for a later save to
+      // retry — later saves would otherwise only delete their own immediately
+      // preceding version, leaving the failed entry in the vault forever.
+      const storedPending = read<string[]>(keys.providerCleanup, []);
+      const pending = new Set(storedPending);
+      const attemptCleanup = async (id: string) => {
+        try {
+          await deleteSecret(id);
+          pending.delete(id);
+        } catch {
+          pending.add(id);
+        }
+      };
+      await attemptCleanup(proxySecretId(previousVersion));
+      for (const id of [...pending]) await attemptCleanup(id);
+      if (pending.size !== storedPending.length) write(keys.providerCleanup, [...pending]);
     }
   },
   getConnections: () => read(keys.connections, defaultConnections),
