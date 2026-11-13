@@ -45,7 +45,7 @@ it("normalizes a saved proxy key and sends Basic proxy auth when present", async
     url: "http://proxy:8080",
     key: "gateway key"
   });
-  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy:8080" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy:8080", secretVersion: 1 });
 
   await providerFetch("https://model.example");
   expect(desktopFetch).toHaveBeenCalledWith(
@@ -134,5 +134,5 @@ it("can disable an invalid setting without persisting embedded credentials", asy
 it("migrates a legacy plaintext key entry to the secret storage boundary", async () => {
   localStorage.setItem("ai4h.provider-proxy.v1", JSON.stringify({ enabled: true, url: "http://proxy:8080", key: "legacy key" }));
   expect(await storage.getProviderProxy()).toEqual({ enabled: true, url: "http://proxy:8080", key: "legacy key" });
-  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy:8080" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy:8080", secretVersion: 1 });
 });

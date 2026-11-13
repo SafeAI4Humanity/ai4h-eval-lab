@@ -28,7 +28,7 @@ it("validates the proxy URL and saves one setting that persists after reopening"
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain("saved"));
   await expect(storage.getProviderProxy()).resolves.toEqual({ enabled: true, url: "https://proxy.example:8443", key: "" });
-  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "https://proxy.example:8443" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "https://proxy.example:8443", secretVersion: 1 });
   view.unmount();
   render(<ProviderProxySettings />);
   await waitFor(() => {
@@ -49,7 +49,7 @@ it("saves an optional proxy key through the secret storage boundary, not localSt
   fireEvent.change(screen.getByLabelText("Proxy API key"), { target: { value: "Bearer gateway key" } });
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain("saved"));
-  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy.example:3128" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy.example:3128", secretVersion: 1 });
   await expect(storage.getProviderProxy()).resolves.toEqual({
     enabled: true,
     url: "http://proxy.example:3128",

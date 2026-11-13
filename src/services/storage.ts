@@ -16,6 +16,19 @@ const interfaceScales: InterfaceScale[] = ["default", "comfortable", "large", "e
 
 const PROXY_SECRET_ID = "provider-proxy";
 
+// Persisted proxy config references the vault entry by versioned identifier, so a
+// reader resolves a coherent (config, credential) pair: a published version's
+// credential never changes afterwards.
+type StoredProxyConfig = {
+  enabled: boolean;
+  url: string;
+  secretVersion: number;
+};
+
+function proxySecretId(version: number): string {
+  return `${PROXY_SECRET_ID}:${version}`;
+}
+
 const defaultConnections: Connection[] = [
   {
     id: "ollama-local",
@@ -72,37 +85,43 @@ function write<T>(key: string, value: T): void {
 
 export const storage = {
   getProviderProxy: async (): Promise<ProviderProxySettings> => {
-    const saved = read<Partial<ProviderProxySettings>>(keys.providerProxy, {});
-    const config = { enabled: Boolean(saved.enabled), url: saved.url ?? "" };
-    if (saved.key) {
-      // Migrate entries persisted before the key lived in the secret storage boundary.
-      await setSecret(PROXY_SECRET_ID, saved.key);
-      write(keys.providerProxy, config);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const saved = read<Partial<StoredProxyConfig> & { key?: string }>(keys.providerProxy, {});
+      const config = { enabled: Boolean(saved.enabled), url: saved.url ?? "" };
+      if (saved.key) {
+        // Migrate entries persisted before the key lived in the secret storage boundary.
+        await setSecret(proxySecretId(1), saved.key);
+        write(keys.providerProxy, { ...config, secretVersion: 1 });
+        return { ...config, key: saved.key };
+      }
+      const version = saved.secretVersion ?? 0;
+      const key = await getSecret(proxySecretId(version));
+      // The awaited lookup can span a concurrent save. Re-read after it: if the
+      // version changed during the await, the snapshot is stale, so retry until a
+      // fetch completes for a version that stayed stable — guaranteeing the pair
+      // returned belongs to one version.
+      const after = read<Partial<StoredProxyConfig>>(keys.providerProxy, {});
+      if ((after.secretVersion ?? 0) === version) return { ...config, key };
     }
-    return { ...config, key: await getSecret(PROXY_SECRET_ID) };
+    const saved = read<Partial<StoredProxyConfig>>(keys.providerProxy, {});
+    const version = saved.secretVersion ?? 0;
+    return { enabled: Boolean(saved.enabled), url: saved.url ?? "", key: await getSecret(proxySecretId(version)) };
   },
   setProviderProxy: async (value: ProviderProxySettings): Promise<void> => {
     const key = value.key ?? "";
-    const previousKey = await getSecret(PROXY_SECRET_ID);
-    const config = { enabled: value.enabled, url: value.url };
-    // Commit the credential first, then persist the matching configuration in the
-    // same synchronous continuation, so a concurrent request can never observe a
-    // URL paired with a credential that does not belong to it. Nothing is
-    // persisted before the credential is ready, so a rejected vault write leaves
-    // the stored pair coherent instead of a half-committed state.
-    try {
-      if (key) await setSecret(PROXY_SECRET_ID, key);
-      else await deleteSecret(PROXY_SECRET_ID);
-    } catch (error) {
-      try {
-        if (previousKey) await setSecret(PROXY_SECRET_ID, previousKey);
-        else await deleteSecret(PROXY_SECRET_ID);
-      } catch {
-        // Rollback failed; surface the original error.
-      }
-      throw error;
-    }
+    const saved = read<Partial<StoredProxyConfig>>(keys.providerProxy, {});
+    const previousVersion = saved.secretVersion ?? 0;
+    const version = previousVersion + 1;
+    const config = { enabled: value.enabled, url: value.url, secretVersion: version };
+    // Commit the credential for the new version first, then publish the matching
+    // config in the same synchronous continuation. The persisted entry references
+    // this exact version, and a published version's credential never changes, so
+    // readers always observe a coherent pair. Nothing is persisted before the
+    // credential is ready, so a rejected vault write leaves the stored pair
+    // coherent instead of a half-committed state.
+    if (key) await setSecret(proxySecretId(version), key);
     write(keys.providerProxy, config);
+    if (previousVersion > 0) await deleteSecret(proxySecretId(previousVersion));
   },
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),

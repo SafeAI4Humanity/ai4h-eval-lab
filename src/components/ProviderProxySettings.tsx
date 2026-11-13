@@ -7,13 +7,19 @@ export function ProviderProxySettings() {
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [loadError, setLoadError] = useState("");
   useEffect(() => {
     // The vault lookup is async on desktop: hold the form closed until the stored
     // settings resolve, so a save cannot overwrite an existing configuration with
     // the empty defaults or delete its credential, and a late resolution cannot
-    // discard edits.
+    // discard edits. A rejected lookup is surfaced and leaves the controls open
+    // (recovery: disable the persisted configuration or retry once the vault is
+    // available), so a failure never leaves the form frozen without an error.
     storage.getProviderProxy().then((resolved) => {
       setSettings(resolved);
+      setLoading(false);
+    }).catch((error) => {
+      setLoadError(error instanceof Error ? error.message : "Could not load the stored proxy settings.");
       setLoading(false);
     });
   }, []);
@@ -42,7 +48,7 @@ export function ProviderProxySettings() {
         <p id="provider-proxy-help" className="form-note">Accepts HTTP or HTTPS proxy addresses without embedded credentials. An optional proxy API key is sent as `Proxy-Authorization: Basic` for proxies that require proxy authentication. Changes apply to new requests after saving. When enabled, requests never fall back to a direct connection. Catalogs and app updates use their usual connection.</p>
         {!isTauri() && <p className="form-note">Proxy routing requires the desktop app. Browser preview blocks provider requests while this setting is enabled.</p>}
         {loading && <p className="form-note">Loading the stored proxy settings…</p>}
-        {(validationError || saveError) && <p className="provider-proxy-error" role="alert">{validationError || saveError}</p>}
+        {(validationError || saveError || loadError) && <p className="provider-proxy-error" role="alert">{validationError || saveError || loadError}</p>}
       </div>
       <div className="provider-proxy-actions"><button className="button button-primary button-small" disabled={loading || Boolean(validationError)} onClick={save}>Save proxy settings</button>{saved && <span role="status">Proxy settings saved.</span>}</div>
     </section>

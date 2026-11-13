@@ -35,3 +35,20 @@ it("keeps the form closed until the stored proxy settings resolve", async () => 
     expect((screen.getByLabelText("Proxy API key") as HTMLInputElement).value).toBe("gateway key");
   });
 });
+
+it("surfaces a failed vault lookup and keeps a recovery path open", async () => {
+  vi.mocked(storage.getProviderProxy).mockRejectedValue(new Error("keychain unavailable"));
+
+  render(<ProviderProxySettings />);
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("keychain unavailable"));
+
+  // The form is not left frozen forever without an error: the controls reopen so
+  // the user can disable the persisted configuration (or retry once the vault is
+  // available).
+  const save = screen.getByRole("button", { name: "Save proxy settings" }) as HTMLButtonElement;
+  const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+  expect(save.disabled).toBe(false);
+  expect(checkbox.disabled).toBe(false);
+  fireEvent.click(checkbox);
+  expect(checkbox.checked).toBe(true);
+});
