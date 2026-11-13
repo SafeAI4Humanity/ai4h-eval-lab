@@ -17,7 +17,7 @@ vi.mock("./services/updater", async (original) => ({ ...await original<typeof im
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 afterEach(cleanup);
 
-it("validates the proxy URL and saves one setting that persists after reopening", () => {
+it("validates the proxy URL and saves one setting that persists after reopening", async () => {
   const view = render(<ProviderProxySettings />);
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "socks5://proxy:1080" } });
@@ -25,24 +25,30 @@ it("validates the proxy URL and saves one setting that persists after reopening"
   expect((screen.getByRole("button", { name: "Save proxy settings" }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "https://proxy.example:8443/" } });
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
-  expect(screen.getByRole("status").textContent).toContain("saved");
-  expect(storage.getProviderProxy()).toEqual({ enabled: true, url: "https://proxy.example:8443", key: "" });
+  await waitFor(() => expect(screen.getByRole("status").textContent).toContain("saved"));
+  await expect(storage.getProviderProxy()).resolves.toEqual({ enabled: true, url: "https://proxy.example:8443", key: "" });
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "https://proxy.example:8443" });
   view.unmount();
   render(<ProviderProxySettings />);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
-  expect((screen.getByLabelText("Proxy URL") as HTMLInputElement).value).toBe("https://proxy.example:8443");
+  await waitFor(() => {
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Proxy URL") as HTMLInputElement).value).toBe("https://proxy.example:8443");
+  });
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
-  expect(storage.getProviderProxy().enabled).toBe(false);
+  await waitFor(() => expect(screen.getByRole("status").textContent).toContain("saved"));
+  expect((await storage.getProviderProxy()).enabled).toBe(false);
 });
 
-it("saves an optional proxy key as Basic proxy auth", () => {
+it("saves an optional proxy key through the secret storage boundary, not localStorage", async () => {
   render(<ProviderProxySettings />);
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "http://proxy.example:3128" } });
   fireEvent.change(screen.getByLabelText("Proxy API key"), { target: { value: "Bearer gateway key" } });
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
-  expect(storage.getProviderProxy()).toEqual({
+  await waitFor(() => expect(screen.getByRole("status").textContent).toContain("saved"));
+  expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy.example:3128" });
+  await expect(storage.getProviderProxy()).resolves.toEqual({
     enabled: true,
     url: "http://proxy.example:3128",
     key: "gateway key"

@@ -14,6 +14,8 @@ const keys = {
 
 const interfaceScales: InterfaceScale[] = ["default", "comfortable", "large", "extra-large"];
 
+const PROXY_SECRET_ID = "provider-proxy";
+
 const defaultConnections: Connection[] = [
   {
     id: "ollama-local",
@@ -69,14 +71,22 @@ function write<T>(key: string, value: T): void {
 }
 
 export const storage = {
-  getProviderProxy: (): ProviderProxySettings => {
-    const value = read<ProviderProxySettings>(keys.providerProxy, { enabled: false, url: "", key: "" });
-    return {
-      ...value,
-      key: value.key ?? ""
-    };
+  getProviderProxy: async (): Promise<ProviderProxySettings> => {
+    const saved = read<Partial<ProviderProxySettings>>(keys.providerProxy, {});
+    const config = { enabled: Boolean(saved.enabled), url: saved.url ?? "" };
+    if (saved.key) {
+      // Migrate entries persisted before the key lived in the secret storage boundary.
+      await setSecret(PROXY_SECRET_ID, saved.key);
+      write(keys.providerProxy, config);
+    }
+    return { ...config, key: await getSecret(PROXY_SECRET_ID) };
   },
-  setProviderProxy: (value: ProviderProxySettings) => write(keys.providerProxy, value),
+  setProviderProxy: async (value: ProviderProxySettings): Promise<void> => {
+    write(keys.providerProxy, { enabled: value.enabled, url: value.url });
+    const key = value.key ?? "";
+    if (key) await setSecret(PROXY_SECRET_ID, key);
+    else await deleteSecret(PROXY_SECRET_ID);
+  },
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
   getSources: readSources,

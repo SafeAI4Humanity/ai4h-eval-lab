@@ -8,7 +8,7 @@ export async function appFetch(input: string, init?: RequestInit): Promise<Respo
 
 /** A single setting covers discovery, evaluation, agent turns, and reviews. */
 export async function providerFetch(input: string, init?: RequestInit): Promise<Response> {
-  const settings = storage.getProviderProxy();
+  const settings = await storage.getProviderProxy();
   const proxy = settings.enabled ? providerProxyOption(settings) : undefined;
   if (proxy && !isTauri()) {
     throw new Error("Provider proxy routing requires the desktop app. Disable the proxy to use browser preview.");

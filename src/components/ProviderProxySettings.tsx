@@ -1,20 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isTauri, storage } from "../services/storage";
-import { normalizeProxyUrl, saveProviderProxy } from "../services/providerProxy";
+import { ProviderProxySettings as ProxySettings, normalizeProxyUrl, saveProviderProxy } from "../services/providerProxy";
 
 export function ProviderProxySettings() {
-  const [settings, setSettings] = useState(storage.getProviderProxy);
+  const [settings, setSettings] = useState<ProxySettings>({ enabled: false, url: "", key: "" });
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+  useEffect(() => { void storage.getProviderProxy().then(setSettings); }, []);
   let validationError = "";
   if (settings.enabled) {
     try { normalizeProxyUrl(settings.url); }
     catch (error) { validationError = (error as Error).message; }
   }
-  const save = () => {
+  const save = async () => {
     try {
-      saveProviderProxy(settings);
-      setSettings(storage.getProviderProxy());
+      await saveProviderProxy(settings);
+      setSettings(await storage.getProviderProxy());
       setSaved(true);
       setSaveError("");
     } catch (error) {

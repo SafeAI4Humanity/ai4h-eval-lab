@@ -56,12 +56,12 @@ export function providerProxyOption(settings: ProviderProxySettings): ProxyOptio
   };
 }
 
-export function saveProviderProxy(settings: ProviderProxySettings): void {
+export async function saveProviderProxy(settings: ProviderProxySettings): Promise<void> {
   let url = "";
   try { url = normalizeProxyUrl(settings.url); }
   catch (error) { if (settings.enabled) throw error; }
 
-  storage.setProviderProxy({
+  await storage.setProviderProxy({
     enabled: settings.enabled,
     url,
     key: normalizeProxyKey(settings.key)
