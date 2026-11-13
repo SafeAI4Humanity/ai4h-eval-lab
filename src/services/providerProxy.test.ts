@@ -32,18 +32,20 @@ it.each(["http://localhost:8080", "https://proxy.example:8443"])("persists and r
   }
 });
 
-it("normalizes a saved proxy key and sends Basic proxy auth when present", async () => {
-  expect(normalizeProxyKey("Bearer gateway key")).toBe("gateway key");
-  expect(providerProxyOption({ enabled: true, url: "http://proxy:8080", key: "gateway key" })).toEqual({
+it("stores and sends proxy credentials verbatim as opaque values", async () => {
+  expect(normalizeProxyKey("Bearer gateway key")).toBe("Bearer gateway key");
+  expect(normalizeProxyKey("  spaced password  ")).toBe("  spaced password  ");
+  expect(normalizeProxyKey(undefined)).toBe("");
+  expect(providerProxyOption({ enabled: true, url: "http://proxy:8080", key: "Bearer gateway key" })).toEqual({
     url: "http://proxy:8080",
-    basicAuth: { username: "", password: "gateway key" }
+    basicAuth: { username: "", password: "Bearer gateway key" }
   });
 
   await saveProviderProxy({ enabled: true, url: "http://proxy:8080", key: "Bearer gateway key" });
   expect(await storage.getProviderProxy()).toEqual({
     enabled: true,
     url: "http://proxy:8080",
-    key: "gateway key"
+    key: "Bearer gateway key"
   });
   expect(JSON.parse(localStorage.getItem("ai4h.provider-proxy.v1")!)).toEqual({ enabled: true, url: "http://proxy:8080", secretVersion: 1, hasSecret: true });
 
@@ -54,7 +56,7 @@ it("normalizes a saved proxy key and sends Basic proxy auth when present", async
       proxy: {
         all: {
           url: "http://proxy:8080",
-          basicAuth: { username: "", password: "gateway key" }
+          basicAuth: { username: "", password: "Bearer gateway key" }
         }
       }
     })
@@ -127,7 +129,7 @@ it("rejects invalid persisted enabled settings without sending a request", async
 
 it("can disable an invalid setting without persisting embedded credentials", async () => {
   await saveProviderProxy({ enabled: false, url: "http://user:secret@proxy:8080", key: "Bearer gateway key" });
-  expect(await storage.getProviderProxy()).toEqual({ enabled: false, url: "", key: "gateway key" });
+  expect(await storage.getProviderProxy()).toEqual({ enabled: false, url: "", key: "Bearer gateway key" });
   expect(localStorage.getItem("ai4h.provider-proxy.v1")).not.toContain("gateway key");
 });
 

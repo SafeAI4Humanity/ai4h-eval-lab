@@ -53,7 +53,7 @@ it("saves an optional proxy key through the secret storage boundary, not localSt
   await expect(storage.getProviderProxy()).resolves.toEqual({
     enabled: true,
     url: "http://proxy.example:3128",
-    key: "gateway key"
+    key: "Bearer gateway key"
   });
 });
 

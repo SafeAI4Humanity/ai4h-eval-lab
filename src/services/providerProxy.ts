@@ -29,9 +29,11 @@ export function normalizeProxyUrl(value: string): string {
 }
 
 export function normalizeProxyKey(value: string | undefined): string {
-  const key = value?.trim();
-  if (!key) return "";
-  return key.replace(/^Bearer\s+/i, "").trim();
+  // Proxy credentials are opaque: Tauri sends basicAuth.password verbatim to the
+  // proxy server, so trimming or stripping a "Bearer " prefix can break
+  // authentication for values the user entered correctly. Only an absent value
+  // counts as "no key".
+  return value ?? "";
 }
 
 export function normalizeProviderProxySettings(settings: ProviderProxySettings): ProviderProxySettings {
