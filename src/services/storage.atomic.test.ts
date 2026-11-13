@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { storage } from "./storage";
 import { saveProviderProxy } from "./providerProxy";
 
@@ -12,13 +12,14 @@ const vault = new Map<string, string>();
 const configAtCommit: (string | null)[] = [];
 
 function fakeVault(failWrites = false) {
-  vi.mocked(invoke).mockImplementation(async (command: string, args?: Record<string, string>) => {
-    const id = args?.connectionId ?? "";
+  vi.mocked(invoke).mockImplementation(async (command: string, args?: InvokeArgs) => {
+    const payload = (args ?? {}) as Record<string, unknown>;
+    const id = String(payload.connectionId ?? "");
     if (command === "get_secret") return vault.get(id) ?? "";
     if (failWrites) throw new Error("vault unavailable");
     if (command === "store_secret") {
       configAtCommit.push(localStorage.getItem(PERSISTED));
-      vault.set(id, args?.secret ?? "");
+      vault.set(id, String(payload.secret ?? ""));
       return null;
     }
     configAtCommit.push(localStorage.getItem(PERSISTED));
