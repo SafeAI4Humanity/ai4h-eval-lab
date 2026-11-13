@@ -19,6 +19,7 @@ afterEach(cleanup);
 
 it("validates the proxy URL and saves one setting that persists after reopening", async () => {
   const view = render(<ProviderProxySettings />);
+  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "socks5://proxy:1080" } });
   expect(screen.getByRole("alert").textContent).toContain("HTTP or HTTPS");
@@ -42,6 +43,7 @@ it("validates the proxy URL and saves one setting that persists after reopening"
 
 it("saves an optional proxy key through the secret storage boundary, not localStorage", async () => {
   render(<ProviderProxySettings />);
+  await waitFor(() => expect((screen.getByRole("checkbox") as HTMLInputElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "http://proxy.example:3128" } });
   fireEvent.change(screen.getByLabelText("Proxy API key"), { target: { value: "Bearer gateway key" } });

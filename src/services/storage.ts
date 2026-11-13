@@ -82,10 +82,27 @@ export const storage = {
     return { ...config, key: await getSecret(PROXY_SECRET_ID) };
   },
   setProviderProxy: async (value: ProviderProxySettings): Promise<void> => {
-    write(keys.providerProxy, { enabled: value.enabled, url: value.url });
     const key = value.key ?? "";
-    if (key) await setSecret(PROXY_SECRET_ID, key);
-    else await deleteSecret(PROXY_SECRET_ID);
+    const previousKey = await getSecret(PROXY_SECRET_ID);
+    const config = { enabled: value.enabled, url: value.url };
+    // Commit the credential first, then persist the matching configuration in the
+    // same synchronous continuation, so a concurrent request can never observe a
+    // URL paired with a credential that does not belong to it. Nothing is
+    // persisted before the credential is ready, so a rejected vault write leaves
+    // the stored pair coherent instead of a half-committed state.
+    try {
+      if (key) await setSecret(PROXY_SECRET_ID, key);
+      else await deleteSecret(PROXY_SECRET_ID);
+    } catch (error) {
+      try {
+        if (previousKey) await setSecret(PROXY_SECRET_ID, previousKey);
+        else await deleteSecret(PROXY_SECRET_ID);
+      } catch {
+        // Rollback failed; surface the original error.
+      }
+      throw error;
+    }
+    write(keys.providerProxy, config);
   },
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
