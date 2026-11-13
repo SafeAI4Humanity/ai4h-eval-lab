@@ -23,6 +23,7 @@ type StoredProxyConfig = {
   enabled: boolean;
   url: string;
   secretVersion: number;
+  hasSecret: boolean;
 };
 
 function proxySecretId(version: number): string {
@@ -91,10 +92,14 @@ export const storage = {
       if (saved.key) {
         // Migrate entries persisted before the key lived in the secret storage boundary.
         await setSecret(proxySecretId(1), saved.key);
-        write(keys.providerProxy, { ...config, secretVersion: 1 });
+        write(keys.providerProxy, { ...config, secretVersion: 1, hasSecret: true });
         return { ...config, key: saved.key };
       }
       const version = saved.secretVersion ?? 0;
+      // Versions without a credential — fresh installs (version 0) and keyless
+      // saves — must never touch the vault, so a locked keychain cannot break
+      // local providers that need no secret or the UI's recovery path.
+      if (version === 0 || saved.hasSecret === false) return { ...config, key: "" };
       const key = await getSecret(proxySecretId(version));
       // The awaited lookup can span a concurrent save. Re-read after it: if the
       // version changed during the await, the snapshot is stale, so retry until a
@@ -105,6 +110,9 @@ export const storage = {
     }
     const saved = read<Partial<StoredProxyConfig>>(keys.providerProxy, {});
     const version = saved.secretVersion ?? 0;
+    if (version === 0 || saved.hasSecret === false) {
+      return { enabled: Boolean(saved.enabled), url: saved.url ?? "", key: "" };
+    }
     return { enabled: Boolean(saved.enabled), url: saved.url ?? "", key: await getSecret(proxySecretId(version)) };
   },
   setProviderProxy: async (value: ProviderProxySettings): Promise<void> => {
@@ -112,7 +120,7 @@ export const storage = {
     const saved = read<Partial<StoredProxyConfig>>(keys.providerProxy, {});
     const previousVersion = saved.secretVersion ?? 0;
     const version = previousVersion + 1;
-    const config = { enabled: value.enabled, url: value.url, secretVersion: version };
+    const config = { enabled: value.enabled, url: value.url, secretVersion: version, hasSecret: Boolean(key) };
     // Commit the credential for the new version first, then publish the matching
     // config in the same synchronous continuation. The persisted entry references
     // this exact version, and a published version's credential never changes, so
@@ -121,7 +129,17 @@ export const storage = {
     // coherent instead of a half-committed state.
     if (key) await setSecret(proxySecretId(version), key);
     write(keys.providerProxy, config);
-    if (previousVersion > 0) await deleteSecret(proxySecretId(previousVersion));
+    if (previousVersion > 0) {
+      // Post-commit cleanup of the superseded entry is best-effort: the new pair
+      // is already committed, so a rejected keychain delete must not report the
+      // save as failed. The orphaned entry is unreachable — the persisted config
+      // references only the new version.
+      try {
+        await deleteSecret(proxySecretId(previousVersion));
+      } catch {
+        // Left behind until the keychain recovers; harmless and unreferenced.
+      }
+    }
   },
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
