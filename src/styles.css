@@ -588,8 +588,19 @@ main { width: calc(100% - var(--sidebar)); min-width: 0; margin-left: var(--side
 .settings-nav { display: flex; flex-direction: column; padding: 7px; }
 .settings-nav button { min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 7px; color: #6d7e7a; background: none; font-size: calc(9px * var(--font-scale)); font-weight: 650; cursor: pointer; text-align: left; }
 .settings-nav button.active { color: var(--teal-700); background: #eaf6f3; }
-.settings-main { display: flex; flex-direction: column; gap: 16px; }
+.settings-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .settings-section { overflow: hidden; }
+.provider-proxy-body { display: flex; flex-direction: column; gap: 16px; padding: 18px 19px; min-width: 0; }
+.provider-proxy-body .toggle-row { align-items: flex-start; line-height: 1.5; cursor: pointer; }
+.provider-proxy-body .toggle-row input { flex: 0 0 auto; margin: 0.2em 0 0; }
+.provider-proxy-body .field { min-width: 0; }
+.provider-proxy-body .field input { min-width: 0; min-height: 39px; height: auto; padding: 10px 11px; }
+.provider-proxy-body .field input:disabled { color: #84928f; background: #f4f7f6; cursor: not-allowed; }
+.provider-proxy-body .form-note { overflow-wrap: anywhere; }
+.provider-proxy-error { margin: 0; color: #a54848; font-size: calc(10px * var(--font-scale)); line-height: 1.5; overflow-wrap: anywhere; }
+.provider-proxy-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 15px 19px; border-top: 1px solid #e4eae8; background: #fafcfb; }
+.provider-proxy-actions .button { max-width: 100%; padding-top: 8px; padding-bottom: 8px; white-space: normal; }
+.provider-proxy-actions [role="status"] { color: var(--teal-700); font-size: calc(10px * var(--font-scale)); line-height: 1.5; }
 .source-list { padding: 7px 16px; }
 .source-row { min-height: 67px; display: grid; grid-template-columns: auto minmax(160px,1fr) auto auto auto; align-items: center; gap: 12px; padding: 9px 3px; border-bottom: 1px solid #e9eeed; }
 .source-row:last-child { border-bottom: 0; }
