@@ -26,7 +26,7 @@ it("validates the proxy URL and saves one setting that persists after reopening"
   fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "https://proxy.example:8443/" } });
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
   expect(screen.getByRole("status").textContent).toContain("saved");
-  expect(storage.getProviderProxy()).toEqual({ enabled: true, url: "https://proxy.example:8443" });
+  expect(storage.getProviderProxy()).toEqual({ enabled: true, url: "https://proxy.example:8443", key: "" });
   view.unmount();
   render(<ProviderProxySettings />);
   expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
@@ -34,6 +34,19 @@ it("validates the proxy URL and saves one setting that persists after reopening"
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
   expect(storage.getProviderProxy().enabled).toBe(false);
+});
+
+it("saves an optional proxy key as Basic proxy auth", () => {
+  render(<ProviderProxySettings />);
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.change(screen.getByLabelText("Proxy URL"), { target: { value: "http://proxy.example:3128" } });
+  fireEvent.change(screen.getByLabelText("Proxy API key"), { target: { value: "Bearer gateway key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save proxy settings" }));
+  expect(storage.getProviderProxy()).toEqual({
+    enabled: true,
+    url: "http://proxy.example:3128",
+    key: "gateway key"
+  });
 });
 
 it("opens Settings at the proxy section from the Connections link", async () => {

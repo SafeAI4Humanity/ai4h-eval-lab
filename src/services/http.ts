@@ -1,4 +1,4 @@
-import { normalizeProxyUrl } from "./providerProxy";
+import { ProxyOption, providerProxyOption } from "./providerProxy";
 import { storage, isTauri } from "./storage";
 import { diagnosticLog, redactDiagnosticUrl } from "./diagnostics";
 
@@ -9,24 +9,24 @@ export async function appFetch(input: string, init?: RequestInit): Promise<Respo
 /** A single setting covers discovery, evaluation, agent turns, and reviews. */
 export async function providerFetch(input: string, init?: RequestInit): Promise<Response> {
   const settings = storage.getProviderProxy();
-  const proxyUrl = settings.enabled ? normalizeProxyUrl(settings.url) : undefined;
-  if (proxyUrl && !isTauri()) {
+  const proxy = settings.enabled ? providerProxyOption(settings) : undefined;
+  if (proxy && !isTauri()) {
     throw new Error("Provider proxy routing requires the desktop app. Disable the proxy to use browser preview.");
   }
   try {
-    const response = await transportFetch(input, init, proxyUrl);
-    if (proxyUrl && response.status === 407) {
+    const response = await transportFetch(input, init, proxy);
+    if (proxy && response.status === 407) {
       throw new Error("The proxy requires authentication (HTTP 407).");
     }
     return response;
   } catch (error) {
-    if (!proxyUrl || init?.signal?.aborted || (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError")) throw error;
+    if (!proxy || init?.signal?.aborted || (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError")) throw error;
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Provider request through the proxy failed. Check the proxy server and Settings & sources → Model provider proxy. No direct connection was attempted. Details: ${detail}`, { cause: error });
   }
 }
 
-async function transportFetch(input: string, init?: RequestInit, proxyUrl?: string): Promise<Response> {
+async function transportFetch(input: string, init?: RequestInit, proxy?: ProxyOption): Promise<Response> {
   const startedAt = Date.now();
   const desktop = isTauri();
   const method = init?.method ?? "GET";
@@ -36,7 +36,7 @@ async function transportFetch(input: string, init?: RequestInit, proxyUrl?: stri
     let response: Response;
     if (desktop) {
       const { fetch } = await import("@tauri-apps/plugin-http");
-      response = await fetch(input, { ...init, ...(proxyUrl ? { proxy: { all: proxyUrl } } : {}) });
+      response = await fetch(input, { ...init, ...(proxy ? { proxy: { all: proxy } } : {}) });
     } else {
       response = await window.fetch(input, init);
     }
@@ -51,7 +51,7 @@ async function transportFetch(input: string, init?: RequestInit, proxyUrl?: stri
   } catch (error) {
     let causeChain: string | undefined = undefined;
     // A direct diagnostic probe would bypass an enabled provider proxy.
-    if (desktop && !proxyUrl) {
+    if (desktop && !proxy) {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
         causeChain = await invoke("probe_url", { url: input });
@@ -66,7 +66,7 @@ async function transportFetch(input: string, init?: RequestInit, proxyUrl?: stri
       transport: desktop ? "tauri-http" : "browser-fetch",
       error: error instanceof Error ? error.message : String(error),
       causeChain,
-      providerProxy: Boolean(proxyUrl)
+      providerProxy: Boolean(proxy)
     });
     throw error;
   }

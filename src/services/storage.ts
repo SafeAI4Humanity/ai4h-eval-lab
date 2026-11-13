@@ -69,7 +69,13 @@ function write<T>(key: string, value: T): void {
 }
 
 export const storage = {
-  getProviderProxy: () => read<ProviderProxySettings>(keys.providerProxy, { enabled: false, url: "" }),
+  getProviderProxy: (): ProviderProxySettings => {
+    const value = read<ProviderProxySettings>(keys.providerProxy, { enabled: false, url: "", key: "" });
+    return {
+      ...value,
+      key: value.key ?? ""
+    };
+  },
   setProviderProxy: (value: ProviderProxySettings) => write(keys.providerProxy, value),
   getConnections: () => read(keys.connections, defaultConnections),
   setConnections: (value: Connection[]) => write(keys.connections, value),
