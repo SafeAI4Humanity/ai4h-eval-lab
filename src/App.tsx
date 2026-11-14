@@ -984,12 +984,12 @@ export function NewEvaluation({ suites, connections, onStart, onConnections, ini
   const [suiteFormat, setSuiteFormat] = useState("all");
   const [suiteSort, setSuiteSort] = useState<SuiteSort>("released-desc");
   const selectedSuites = suites.filter((suite) => selectedSuiteKeys.includes(suiteKey(suite)));
-  const categories = useMemo(() => [...new Set(suites.map((suite) => suite.category))].sort((a, b) => a.localeCompare(b)), [suites]);
+  const categories = useMemo(() => [...new Set(suites.map((suite) => categoryGroup(suite.category)))].sort((a, b) => a.localeCompare(b)), [suites]);
 
   const visibleSuites = useMemo(() => {
     const query = suiteSearch.trim().toLowerCase();
     const matched = suites.filter((suite) => {
-      if (suiteCategory !== "all" && suite.category !== suiteCategory) return false;
+      if (suiteCategory !== "all" && categoryGroup(suite.category) !== suiteCategory) return false;
       if (suiteRisk !== "all" && suite.risk !== suiteRisk) return false;
       if (suiteFormat !== "all" && String(suite.schemaVersion) !== suiteFormat) return false;
       if (!query) return true;
@@ -1002,7 +1002,7 @@ export function NewEvaluation({ suites, connections, onStart, onConnections, ini
       if (suiteSort === "title-asc") return a.title.localeCompare(b.title);
       if (suiteSort === "tests-desc") return b.cases.length - a.cases.length || a.title.localeCompare(b.title);
       if (suiteSort === "risk-desc") return riskOrder[b.risk] - riskOrder[a.risk] || a.title.localeCompare(b.title);
-      return a.category.localeCompare(b.category) || a.title.localeCompare(b.title);
+      return categoryGroup(a.category).localeCompare(categoryGroup(b.category)) || a.category.localeCompare(b.category) || a.title.localeCompare(b.title);
     });
   }, [suites, suiteSearch, suiteCategory, suiteRisk, suiteFormat, suiteSort]);
 
